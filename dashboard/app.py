@@ -122,7 +122,7 @@ DASHBOARD_HTML = r"""
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Office Attendance Dashboard</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9 8v-1c0-2 4-3.1 9-3.1 1.05 0 2.12.16 3.12.45.69-.97 1.79-1.66 3.06-1.85-.35-.09-.72-.14-1.1-.14-3.31 0-10 1.67-10 5v1h4.15c-.09-.32-.15-.65-.15-1z' fill='%231f3a5f'/%3E%3Cpath d='M17 14c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm2.5 3.5l-3 3c-.2.2-.51.2-.71 0l-1.5-1.5c-.2-.2-.2-.51 0-.71.2-.2.51-.2.71 0l1.15 1.15 2.65-2.65c.2-.2.51-.2.71 0 .2.2.2.51 0 .71z' fill='%231f3a5f'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%23328243'/%3E%3Cpath d='M42 52c8.28 0 15-6.72 15-15s-6.72-15-15-15-15 6.72-15 15 6.72 15 15 15zm0 8c-10.04 0-30 5.04-30 15v10h60v-10c0-9.96-19.96-15-30-15z' fill='white'/%3E%3Ccircle cx='72' cy='65' r='16' fill='white'/%3E%3Cpath d='M64 65l5 5 10-10' fill='none' stroke='%23328243' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
