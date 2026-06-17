@@ -41,6 +41,7 @@ def initialise_database():
     db.daily_summary.create_index([("employee_id", 1), ("work_date", 1)], unique=True)
     db.camera_status.create_index("camera_name", unique=True)
     db.unknown_detections.create_index("timestamp")
+    db.captured_frames.create_index("timestamp", expireAfterSeconds=2592000)
     print("[DB] Database initialised successfully via PyMongo.")
 
 
@@ -61,10 +62,21 @@ def log_event(employee_id, employee_name, event_type, confidence, camera_source)
     print(f"[DB] Logged: {employee_name} | {event_type.upper()} | {event_time} | confidence: {confidence:.2f}")
 
 
-def log_presence_event(employee_id, employee_name, confidence, camera_source):
+def log_presence_event(employee_id, employee_name, confidence, camera_source, frame_b64=None):
     event_time = strftime_now()
     work_date  = strftime_today()
     db = get_db()
+
+    # Log the captured frame if provided
+    if frame_b64:
+        db.captured_frames.insert_one({
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "timestamp": datetime.utcnow(),
+            "event_time_local": event_time,
+            "camera_source": camera_source,
+            "frame_b64": frame_b64
+        })
 
     doc = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
 

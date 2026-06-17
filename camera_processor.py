@@ -20,6 +20,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from datetime import datetime, timedelta
+import base64
 
 from face_engine import FaceEngine, load_employee_database
 from config import (
@@ -219,7 +220,21 @@ def process_camera(camera_url, camera_name, employee_db,
                         
                     try:
                         log.info("[%s] MATCH: %s | confidence: %.2f", camera_name.upper(), emp_name, confidence)
-                        log_presence_event(emp_id, emp_name, confidence, camera_name)
+                        
+                        # Encode the face crop for cloud storage
+                        h, w = work_frame.shape[:2]
+                        x1, y1, x2, y2 = face["box"]
+                        x1, y1 = max(0, x1), max(0, y1)
+                        x2, y2 = min(w, x2), min(h, y2)
+                        face_crop = work_frame[y1:y2, x1:x2]
+                        
+                        frame_b64 = None
+                        if face_crop.size > 0:
+                            ret, buffer = cv2.imencode('.jpg', face_crop, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                            if ret:
+                                frame_b64 = base64.b64encode(buffer).decode('utf-8')
+                        
+                        log_presence_event(emp_id, emp_name, confidence, camera_name, frame_b64=frame_b64)
                         cooldown_tracker.mark_seen(emp_id)
                     except Exception as exc:
                         log.error("[%s] DB log_presence_event error: %s", camera_name.upper(), exc)

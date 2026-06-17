@@ -641,6 +641,7 @@ DASHBOARD_HTML = r"""
   {% endif %}
   <div class="tab {% if hide_cameras %}active{% endif %}" id="nav-tab-attendance" onclick="showTab('tab-attendance')">Daily Dashboard</div>
   <div class="tab" id="nav-tab-monthly" onclick="showTab('tab-monthly')">Monthly Reports</div>
+  <div class="tab" id="nav-tab-frames" onclick="showTab('tab-frames')">Captured Frames</div>
 </div>
 
 <div class="main">
@@ -809,6 +810,16 @@ DASHBOARD_HTML = r"""
     </div>
   </div>
 
+  <!-- ══════════════════ CAPTURED FRAMES ══════════════════ -->
+  <div id="tab-frames" class="page">
+    <div class="section-head" style="padding:16px 18px 0;">
+      <div class="section-title">Captured Face Frames</div>
+      <button onclick="loadFrames()">Refresh Frames</button>
+    </div>
+    <div class="unknown-grid" id="frames-container" style="padding: 16px;">
+      <p style="color:var(--text-muted);font-style:italic;">Loading frames...</p>
+    </div>
+  </div>
 
 </div><!-- /main -->
 </div><!-- /container -->
@@ -980,6 +991,7 @@ DASHBOARD_HTML = r"""
     if (id === 'tab-attendance') loadAttendance();
     if (id === 'tab-activity')   loadActivity();
     if (id === 'tab-security')   loadUnknowns();
+    if (id === 'tab-frames')     loadFrames();
   }
 
   // ── Camera status badges ──
@@ -1256,6 +1268,34 @@ DASHBOARD_HTML = r"""
       });
   }
 
+  // ── Captured Frames ──
+  function loadFrames() {
+    const container = document.getElementById('frames-container');
+    container.innerHTML = `<p style="color:var(--text-muted);font-style:italic;">Loading frames...</p>`;
+    fetch('/api/captured_frames')
+      .then(r => r.json())
+      .then(data => {
+        if (!data.length) {
+          container.innerHTML = `<p style="color:var(--text-muted);font-style:italic;">No captured frames in the database.</p>`;
+          return;
+        }
+        container.innerHTML = data.map(item => {
+          const dt = new Date(item.timestamp);
+          const timeStr = dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          const dateStr = dt.toLocaleDateString();
+          return `
+            <div class="unknown-card">
+              <img src="data:image/jpeg;base64,${item.frame_b64}" class="unknown-img" />
+              <div class="unknown-src" style="font-size:12px;color:var(--text);">${item.employee_name}</div>
+              <div class="unknown-src" style="margin-top:2px;">${item.camera_source.replace(/_/g,' ')}</div>
+              <div class="unknown-time">${dateStr}<br><b>${timeStr}</b></div>
+            </div>`;
+        }).join('');
+      }).catch(() => {
+        container.innerHTML = `<p style="color:var(--muted);">Error loading frames.</p>`;
+      });
+  }
+
   // ── Bootstrap ──
   const today = new Date().toISOString().slice(0,7);
   document.getElementById('att-date').value       = todayStr;
@@ -1417,6 +1457,18 @@ def api_export_activity():
     export_activity_to_excel(start, end, tmp.name)
     return send_file(tmp.name, as_attachment=True,
                      download_name=f"Work_Activity_{start}_to_{end}.xlsx")
+
+
+@app.route("/api/captured_frames")
+def api_captured_frames():
+    from attendance_db import get_db
+    db = get_db()
+    docs = list(db.captured_frames.find({}, {"_id": 0}).sort("timestamp", -1).limit(50))
+    # Convert datetime object to string
+    for d in docs:
+        if "timestamp" in d and hasattr(d["timestamp"], "isoformat"):
+            d["timestamp"] = d["timestamp"].isoformat()
+    return jsonify(docs)
 
 
 @app.route("/logs/unknown/<path:filename>")
