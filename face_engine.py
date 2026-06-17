@@ -339,34 +339,19 @@ class FaceEngine:
 # Employee database helpers
 # ------------------------------------------------------------------
 
-def load_employee_database_from_sqlite(db_path: str = None) -> dict:
+def load_employee_database_from_mongo() -> dict:
     """
-    Load the employee embedding database from SQLite (employees.db).
-
-    Returns a dict compatible with FaceEngine.match():
-        {
-          "kalyan_sai": {
-              "name":        "kalyan sai",
-              "embeddings":  [np.ndarray(512,)],
-              "image_count": 87,
-          },
-          ...
-        }
-    Returns {} if the database does not exist or has no employees.
+    Load the employee embedding database from MongoDB.
     """
-    db_path = db_path or EMPLOYEE_DB_PATH
-    if not os.path.exists(db_path):
-        log.warning("[FACE] SQLite DB not found: %s", db_path)
-        return {}
     try:
         from employee_db import EmployeeDB
-        edb = EmployeeDB(db_path)
+        edb = EmployeeDB()
         edb.initialize()
         data = edb.get_all()
-        log.info("[FACE] Loaded %d employee(s) from SQLite: %s", len(data), db_path)
+        log.info("[FACE] Loaded %d employee(s) from MongoDB.", len(data))
         return data
     except Exception as exc:
-        log.error("[FACE] Could not load SQLite DB: %s", exc)
+        log.error("[FACE] Could not load MongoDB: %s", exc)
         return {}
 
 
@@ -375,11 +360,10 @@ def load_employee_database(path: str = None) -> dict:
     Load the employee embedding database.
 
     Strategy (preferred → fallback):
-      1. SQLite  data/employees.db   — primary store (Phase 3+)
+      1. MongoDB   — primary store (Phase 3+)
       2. Pickle  enrollment/embeddings.pkl — legacy fallback
 
-    Pass an explicit `path` to override the default SQLite location
-    (e.g. pass the pkl path directly to force pickle loading).
+    Pass an explicit `path` to override the default (e.g. pass the pkl path directly to force pickle loading).
 
     Returns {} if neither source is available.
     """
@@ -387,13 +371,12 @@ def load_employee_database(path: str = None) -> dict:
     if path and path.endswith(".pkl"):
         return _load_pkl(path)
 
-    # Try SQLite first
-    sqlite_path = path or EMPLOYEE_DB_PATH
-    if os.path.exists(sqlite_path):
-        data = load_employee_database_from_sqlite(sqlite_path)
-        if data:
-            return data
-        log.warning("[FACE] SQLite DB empty or failed — falling back to pkl.")
+    # Try MongoDB first
+    data = load_employee_database_from_mongo()
+    if data:
+        return data
+        
+    log.warning("[FACE] MongoDB empty or failed — falling back to pkl.")
 
     # Fallback to pickle
     return _load_pkl(EMBEDDINGS_FILE)
