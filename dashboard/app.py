@@ -638,7 +638,6 @@ DASHBOARD_HTML = r"""
 <div class="tabs">
   <div class="tab active" id="nav-tab-attendance" onclick="showTab('tab-attendance')">Daily Dashboard</div>
   <div class="tab" id="nav-tab-monthly" onclick="showTab('tab-monthly')">Monthly Reports</div>
-  <div class="tab" id="nav-tab-frames" onclick="showTab('tab-frames')">Captured Frames</div>
   <div class="tab" id="nav-tab-enroll" onclick="showTab('tab-enroll')">Enroll Employee</div>
 </div>
 
@@ -792,17 +791,6 @@ DASHBOARD_HTML = r"""
           <tr><td colspan="5" class="empty">Select a month above and click Generate Report.</td></tr>
         </tbody>
       </table>
-    </div>
-  </div>
-
-  <!-- ══════════════════ CAPTURED FRAMES ══════════════════ -->
-  <div id="tab-frames" class="page">
-    <div class="section-head" style="padding:16px 18px 0;">
-      <div class="section-title">Captured Face Frames</div>
-      <button onclick="loadFrames()">Refresh Frames</button>
-    </div>
-    <div class="unknown-grid" id="frames-container" style="padding: 16px;">
-      <p style="color:var(--text-muted);font-style:italic;">Loading frames...</p>
     </div>
   </div>
 
@@ -1021,7 +1009,6 @@ DASHBOARD_HTML = r"""
     if (id === 'tab-attendance') loadAttendance();
     if (id === 'tab-activity')   loadActivity();
     if (id === 'tab-security')   loadUnknowns();
-    if (id === 'tab-frames')     loadFrames();
     if (id === 'tab-enroll')     loadEmployees();
   }
 
@@ -1296,34 +1283,6 @@ DASHBOARD_HTML = r"""
           }).join('') + `</div>`;
       }).catch(() => {
         container.innerHTML = `<p style="color:var(--muted);">Error loading security logs.</p>`;
-      });
-  }
-
-  // ── Captured Frames ──
-  function loadFrames() {
-    const container = document.getElementById('frames-container');
-    container.innerHTML = `<p style="color:var(--text-muted);font-style:italic;">Loading frames...</p>`;
-    fetch('/api/captured_frames')
-      .then(r => r.json())
-      .then(data => {
-        if (!data.length) {
-          container.innerHTML = `<p style="color:var(--text-muted);font-style:italic;">No captured frames in the database.</p>`;
-          return;
-        }
-        container.innerHTML = data.map(item => {
-          const dt = new Date(item.timestamp);
-          const timeStr = dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-          const dateStr = dt.toLocaleDateString();
-          return `
-            <div class="unknown-card">
-              <img src="data:image/jpeg;base64,${item.frame_b64}" class="unknown-img" />
-              <div class="unknown-src" style="font-size:12px;color:var(--text);">${item.employee_name}</div>
-              <div class="unknown-src" style="margin-top:2px;">${item.camera_source.replace(/_/g,' ')}</div>
-              <div class="unknown-time">${dateStr}<br><b>${timeStr}</b></div>
-            </div>`;
-        }).join('');
-      }).catch(() => {
-        container.innerHTML = `<p style="color:var(--muted);">Error loading frames.</p>`;
       });
   }
 
