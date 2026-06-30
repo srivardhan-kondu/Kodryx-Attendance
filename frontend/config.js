@@ -5,4 +5,4 @@
 //  On Vercel you can instead set this from an env var at build,
 //  but editing this one line is the simplest.
 // ============================================================
-window.API_BASE = "";
+window.API_BASE = "https://kodryx-attendance-backend.onrender.com";
