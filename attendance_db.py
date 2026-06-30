@@ -9,15 +9,28 @@ import pandas as pd
 import pickle
 from pymongo import MongoClient
 
-from tz_utils import strftime_today, strftime_now
+from tz_utils import strftime_today, strftime_now, now_ist
 from config import (
     MONTHLY_WORKING_DAYS, EMBEDDINGS_FILE,
     WORKDAY_START_TIME, WORKDAY_END_TIME, TARGET_WORK_HOURS,
-    MONGO_URI
+    ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, MONGO_URI
 )
 
 _client = None
 _db = None
+
+
+def _hours_between(start_str, end_str):
+    """Hours between two 'YYYY-MM-DD HH:MM:SS' strings (>= 0.0)."""
+    if not start_str or not end_str:
+        return 0.0
+    try:
+        fmt = "%Y-%m-%d %H:%M:%S"
+        delta = datetime.strptime(end_str, fmt) - datetime.strptime(start_str, fmt)
+        return max(0.0, delta.total_seconds() / 3600.0)
+    except Exception:
+        return 0.0
+
 
 def get_db():
     global _client, _db
@@ -39,9 +52,6 @@ def initialise_database():
     db = get_db()
     db.attendance_events.create_index([("employee_id", 1), ("work_date", 1)])
     db.daily_summary.create_index([("employee_id", 1), ("work_date", 1)], unique=True)
-    db.camera_status.create_index("camera_name", unique=True)
-    db.unknown_detections.create_index("timestamp")
-    db.captured_frames.create_index("timestamp", expireAfterSeconds=2592000)
     print("[DB] Database initialised successfully via PyMongo.")
 
 
@@ -63,43 +73,55 @@ def log_event(employee_id, employee_name, event_type, confidence, camera_source)
 
 
 def log_presence_event(employee_id, employee_name, confidence, camera_source, frame_b64=None):
+    """
+    Time-based entry/exit (one camera can't tell arriving from leaving, so the
+    clock decides):
+      • Scan BEFORE  ATTENDANCE_SPLIT_HOUR  -> ENTRY (login). first_seen set once.
+      • Scan AT/AFTER ATTENDANCE_SPLIT_HOUR -> EXIT  (logout). last_seen = the
+        latest evening scan; it stays blank until a real evening checkout, so
+        entry and exit are never the same fake value.
+      • Morning re-scans are ignored; an evening scan within EXIT_MIN_GAP_HOURS
+        of entry is treated as lingering and ignored too.
+    """
     event_time = strftime_now()
     work_date  = strftime_today()
+    now = now_ist()
+    is_evening = (now.hour + now.minute / 60.0) >= ATTENDANCE_SPLIT_HOUR
     db = get_db()
-
-    # Log the captured frame if provided
-    if frame_b64:
-        db.captured_frames.insert_one({
-            "employee_id": employee_id,
-            "employee_name": employee_name,
-            "timestamp": datetime.utcnow(),
-            "event_time_local": event_time,
-            "camera_source": camera_source,
-            "frame_b64": frame_b64
-        })
 
     doc = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
 
-    if doc:
-        # Already marked today. Update last_seen.
-        db.daily_summary.update_one(
-            {"_id": doc["_id"]},
-            {"$set": {"last_seen": event_time}}
-        )
-        print(f"[DB] Presence Updated (Last Seen): {employee_name} | {event_time}")
-    else:
-        # First detection of the day
+    if doc is None:
+        # First scan of the day = entry. Exit (last_seen) stays empty until a
+        # genuine evening checkout.
         db.daily_summary.insert_one({
             "employee_id": employee_id,
             "employee_name": employee_name,
             "work_date": work_date,
             "first_seen": event_time,
-            "last_seen": event_time,
-            "status": "Present",
+            "last_seen": None,
+            "status": "In office",
             "hours_worked": 0.0,
-            "session_breakdown": None
+            "session_breakdown": None,
         })
-        print(f"[DB] Attendance Marked (First Seen): {employee_name} | {event_time}")
+        print(f"[DB] Entry (login): {employee_name} | {event_time}")
+        return
+
+    # Already checked in. Morning re-scans never count as an exit.
+    if not is_evening:
+        return
+
+    # Evening scan = checkout. Ignore lingering right after entry.
+    hours = _hours_between(doc.get("first_seen"), event_time)
+    if hours < EXIT_MIN_GAP_HOURS:
+        return
+
+    status = "Complete" if hours >= TARGET_WORK_HOURS else "Short"
+    db.daily_summary.update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"last_seen": event_time, "hours_worked": hours, "status": status}},
+    )
+    print(f"[DB] Exit (logout): {employee_name} | {event_time} | {hours:.2f}h")
 
 
 def get_last_event_type_today(employee_id):

@@ -1,154 +1,159 @@
-import os
-import cv2
-import numpy as np
-import logging
-from ultralytics import YOLO
+# =============================================================
+#  anti_spoofing.py  —  Passive liveness via Silent-Face MiniFASNet V2
+#
+#  Replaces the old YOLO "is the face inside a screen box" geometry
+#  heuristic (which rejected real employees and let normal-sized
+#  photos through) with a real anti-spoof CNN.
+#
+#  The model scores face TEXTURE into 3 classes; index 1 = "real".
+#  A printed photo or a phone/laptop/TV screen scores as fake, so a
+#  scan of a photo will NOT be marked present.
+#
+#  Public API (unchanged — drop-in for camera_processor.py):
+#      spoof = AntiSpoofing()
+#      spoof.available()                       -> bool
+#      is_real, score = spoof.check_liveness(frame_bgr, [x1,y1,x2,y2])
+# =============================================================
 
-from config import LIVENESS_THRESHOLD, BASE_DIR, get_yolo_device, get_torch_device
+import logging
+import numpy as np
+
+from config import (
+    LIVENESS_THRESHOLD,
+    ANTI_SPOOF_MODEL_PATH,
+    ANTI_SPOOF_SCALE,
+    ANTI_SPOOF_INPUT_SIZE,
+    ANTI_SPOOF_USE_BGR,
+    ANTI_SPOOF_FAIL_OPEN,
+    get_onnx_providers,
+)
 
 log = logging.getLogger(__name__)
 
+try:
+    import cv2
+    import onnxruntime as ort
+    _DEPS_OK = True
+except ImportError as exc:          # pragma: no cover
+    _DEPS_OK = False
+    log.error("[SPOOF] Missing dependency for liveness (%s).", exc)
+
+
+def _softmax(x):
+    e = np.exp(x - np.max(x))
+    return e / e.sum()
+
+
+def _crop_face(img, bbox, scale, out_size):
+    """
+    Reproduce Silent-Face CropImage exactly: expand the face box by
+    `scale` about its centre, clamp to the frame, then resize to a
+    square `out_size`. MiniFASNet was trained on this exact crop, so
+    getting it right is what makes the scores meaningful.
+
+    bbox is [x1, y1, x2, y2]; converted internally to x/y/w/h.
+    """
+    src_h, src_w = img.shape[:2]
+    x1, y1, x2, y2 = bbox
+    box_w = max(1.0, x2 - x1)
+    box_h = max(1.0, y2 - y1)
+
+    scale = min((src_h - 1) / box_h, (src_w - 1) / box_w, scale)
+    new_w = box_w * scale
+    new_h = box_h * scale
+    cx = x1 + box_w / 2.0
+    cy = y1 + box_h / 2.0
+
+    lt_x = cx - new_w / 2.0
+    lt_y = cy - new_h / 2.0
+    rb_x = cx + new_w / 2.0
+    rb_y = cy + new_h / 2.0
+
+    if lt_x < 0:
+        rb_x -= lt_x; lt_x = 0
+    if lt_y < 0:
+        rb_y -= lt_y; lt_y = 0
+    if rb_x > src_w - 1:
+        lt_x -= (rb_x - src_w + 1); rb_x = src_w - 1
+    if rb_y > src_h - 1:
+        lt_y -= (rb_y - src_h + 1); rb_y = src_h - 1
+
+    crop = img[int(lt_y):int(rb_y) + 1, int(lt_x):int(rb_x) + 1]
+    if crop.size == 0:
+        return None
+    return cv2.resize(crop, (out_size, out_size))
+
+
 class AntiSpoofing:
-    """
-    A robust anti-spoofing mechanism that uses YOLOv8 to detect if a face 
-    is located inside a mobile phone, laptop, or TV/Monitor screen.
-    This directly aligns with the requirement to only flag spoofs if shown on a device.
-    """
+    """Passive liveness check backed by MiniFASNet V2 (ONNX)."""
+
     def __init__(self):
-        # Load YOLOv8 nano (very fast, already used in office_tracker)
-        # COCO Classes: 62 = tv, 63 = laptop, 67 = cell phone
-        self.spoof_classes = [62, 63, 67]
-        self._yolo_device = get_yolo_device()
+        self._sess = None
+        self._input_name = None
+        self._scale = ANTI_SPOOF_SCALE
+        self._size = ANTI_SPOOF_INPUT_SIZE
+        self._use_bgr = ANTI_SPOOF_USE_BGR
+
+        if not _DEPS_OK:
+            return
         try:
-            self.yolo = YOLO("yolov8n.pt")
-            self.last_frame_id = None
-            self.last_results = None
-            log.info(
-                "[SPOOF] YOLOv8 Anti-spoofing model loaded on %s.",
-                get_torch_device(),
+            self._sess = ort.InferenceSession(
+                ANTI_SPOOF_MODEL_PATH, providers=get_onnx_providers()
             )
-        except Exception as e:
-            log.error(f"[SPOOF] Failed to load YOLO: {e}")
-            self.yolo = None
+            self._input_name = self._sess.get_inputs()[0].name
+            log.info(
+                "[SPOOF] MiniFASNet liveness loaded (scale=%.1f, size=%d, bgr=%s, thresh=%.2f).",
+                self._scale, self._size, self._use_bgr, LIVENESS_THRESHOLD,
+            )
+        except Exception as exc:
+            log.error("[SPOOF] Failed to load liveness model %s: %s",
+                      ANTI_SPOOF_MODEL_PATH, exc)
+            self._sess = None
 
     def available(self):
-        return self.yolo is not None
+        return self._sess is not None
+
+    def score(self, frame_bgr, bbox):
+        """Return the raw 'real' probability (0.0–1.0), or None on error."""
+        if self._sess is None:
+            return None
+        crop = _crop_face(frame_bgr, bbox, self._scale, self._size)
+        if crop is None:
+            return None
+
+        img = crop if self._use_bgr else cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        # IMPORTANT: this ONNX export expects RAW 0-255 pixel values (NOT /255).
+        # Calibrated against real faces: raw input -> class 1 ("real") ~0.99,
+        # whereas dividing by 255 wrongly collapses real faces onto class 2.
+        x = img.astype(np.float32)                    # raw 0-255, no normalisation
+        x = np.transpose(x, (2, 0, 1))[None, ...]     # HWC -> NCHW
+        try:
+            out = self._sess.run(None, {self._input_name: x})[0][0]
+        except Exception as exc:
+            log.debug("[SPOOF] inference error: %s", exc)
+            return None
+        probs = _softmax(out)
+        return float(probs[1])                         # class 1 == real
 
     def check_liveness(self, frame, bbox):
         """
-        Check if the face is real by ensuring it is not displayed inside a phone or laptop.
-        Returns: (is_real: bool, liveness_score: float)
+        Returns (is_real: bool, score: float).
+
+        If the model is unavailable, behaviour is governed by
+        ANTI_SPOOF_FAIL_OPEN: secure deployments reject (fail closed).
         """
-        if self.yolo is None:
-            return True, 1.0
-            
-        fx1, fy1, fx2, fy2 = bbox
-        face_area = max(0, fx2 - fx1) * max(0, fy2 - fy1)
-        
-        if face_area <= 0:
-            return True, 1.0
+        if self._sess is None:
+            if ANTI_SPOOF_FAIL_OPEN:
+                return True, 1.0
+            log.warning("[SPOOF] Liveness unavailable — rejecting (fail-closed).")
+            return False, 0.0
 
-        # RULE 3: Too Close (Giant Face)
-        frame_h, frame_w = frame.shape[:2]
-        frame_area = frame_h * frame_w
-        if face_area / frame_area > 0.4:
-            log.warning(f"[SPOOF] Face is suspiciously large ({(face_area/frame_area)*100:.1f}% of frame). Rejecting as close-up spoof.")
-            return False, 0.05
+        real_prob = self.score(frame, bbox)
+        if real_prob is None:
+            return (True, 1.0) if ANTI_SPOOF_FAIL_OPEN else (False, 0.0)
 
-        # Cache YOLO results per frame to avoid running it multiple times if there are multiple faces
-        frame_id = id(frame)
-        if self.last_frame_id != frame_id:
-            # Hyper-sensitive screen detection (conf=0.10)
-            self.last_results = self.yolo(
-                frame, imgsz=320, verbose=False, device=self._yolo_device, conf=0.10
-            )
-            self.last_frame_id = frame_id
-            
-        results = self.last_results
-        
-        is_real = True
-        score = 1.0
-        
-        person_boxes = []
-
-        for r in results:
-            for box in r.boxes:
-                cls_id = int(box.cls[0])
-                bx1, by1, bx2, by2 = box.xyxy[0].cpu().numpy()
-                box_area = max(0, bx2 - bx1) * max(0, by2 - by1)
-                
-                # Check for screens (existing logic) or books (class 73)
-                if cls_id in self.spoof_classes or cls_id == 73:
-                    # Ignore massive background TVs/hallucinations. But never ignore cell phones (67) or laptops (63).
-                    if cls_id == 62 and box_area / face_area > 8.0:
-                        continue
-                        
-                    # Calculate how much of the face is inside the screen/book
-                    ix1 = max(fx1, bx1)
-                    iy1 = max(fy1, by1)
-                    ix2 = min(fx2, bx2)
-                    iy2 = min(fy2, by2)
-                    
-                    if ix1 < ix2 and iy1 < iy2:
-                        intersection = (ix2 - ix1) * (iy2 - iy1)
-                        overlap_ratio = intersection / face_area
-                        
-                        if overlap_ratio > 0.3:
-                            is_real = False
-                            score = 0.01
-                            obj_name = "Book/Paper" if cls_id == 73 else f"Screen (class {cls_id})"
-                            log.warning(f"[SPOOF] Face is inside {obj_name} (Overlap: {overlap_ratio:.2f})")
-                            break
-                            
-                # Collect person boxes to evaluate later
-                if cls_id == 0:
-                    person_boxes.append((bx1, by1, bx2, by2, box_area))
-                    
-            if not is_real:
-                break
-                
-        # RULE 1, 2 & 4: Evaluate Person bounding boxes
-        if is_real:
-            best_person_overlap = 0.0
-            best_person_area = 0.0
-            best_person_box = None
-            
-            for bx1, by1, bx2, by2, box_area in person_boxes:
-                ix1 = max(fx1, bx1)
-                iy1 = max(fy1, by1)
-                ix2 = min(fx2, bx2)
-                iy2 = min(fy2, by2)
-                
-                if ix1 < ix2 and iy1 < iy2:
-                    intersection = (ix2 - ix1) * (iy2 - iy1)
-                    overlap_ratio = intersection / face_area
-                    if overlap_ratio > best_person_overlap:
-                        best_person_overlap = overlap_ratio
-                        best_person_area = box_area
-                        best_person_box = (bx1, by1, bx2, by2)
-                        
-            # If the face is not inside any person box (Missing Body Rule)
-            if best_person_overlap < 0.3:
-                log.warning(f"[SPOOF] No YOLO person body found attached to this face (Missing Body Rule).")
-                is_real = False
-                score = 0.05
-            # If the face is inside a person box, check ratios
-            elif best_person_area > 0 and best_person_box is not None:
-                # RULE 2: Disembodied Face Rule
-                face_to_body_ratio = face_area / best_person_area
-                if face_to_body_ratio > 0.85:
-                    log.warning(f"[SPOOF] Face takes up {face_to_body_ratio*100:.1f}% of detected body. Rejecting as printed photo.")
-                    is_real = False
-                    score = 0.05
-                else:
-                    # RULE 4: Face Position Rule (Chest-level spoofing)
-                    face_cy = (fy1 + fy2) / 2.0
-                    person_h = best_person_box[3] - best_person_box[1]
-                    if person_h > 0:
-                        relative_y = (face_cy - best_person_box[1]) / person_h
-                        if relative_y > 0.45:
-                            log.warning(f"[SPOOF] Face is located too low on the body (Y-ratio: {relative_y:.2f}). Rejecting as chest-level spoof!")
-                            is_real = False
-                            score = 0.05
-                            
-        return is_real, score
+        is_real = real_prob >= LIVENESS_THRESHOLD
+        if not is_real:
+            log.warning("[SPOOF] Spoof/photo rejected (real_prob=%.2f < %.2f).",
+                        real_prob, LIVENESS_THRESHOLD)
+        return is_real, real_prob
