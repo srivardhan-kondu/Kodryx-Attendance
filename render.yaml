@@ -1,0 +1,16 @@
+# Render backend (API + face recognition).
+# NOTE: InsightFace + the face model need RAM — the free 512MB tier will
+# likely OOM. Use a paid instance with >= 2GB.
+services:
+  - type: web
+    name: attendance-backend
+    runtime: python
+    plan: standard            # free/starter may OOM on the AI model
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn dashboard.app:app --workers 1 --timeout 180 --bind 0.0.0.0:$PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URI        # set this in the Render dashboard (your Atlas URI)
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.9"

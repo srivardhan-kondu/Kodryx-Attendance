@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Office Attendance</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231f3a5f'/%3E%3Cpath d='M42 52c8 0 15-7 15-15S50 22 42 22 27 29 27 37s7 15 15 15zm0 8c-10 0-30 5-30 15v10h60V75c0-10-20-15-30-15z' fill='white'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f6f5f1; --surface:#fff; --inset:#faf9f5; --border:#e4e1d8; --border2:#cfcbbe;
+  --text:#1c1b18; --soft:#4a4945; --muted:#7a7870; --accent:#1f3a5f; --accent-soft:#e7ecf3;
+  --green:#1f7a4d; --green-bg:#e6f1ea; --red:#a8331f; --red-bg:#f6e6e1;
+  --yellow:#8a5a0b; --yellow-bg:#f5ecd7; --blue:#28556e; --blue-bg:#e4edf2;
+  --mono:'IBM Plex Mono',monospace; --sans:'Inter',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);height:64px;display:flex;
+  align-items:center;justify-content:space-between;padding:0 32px;position:sticky;top:0;z-index:100}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-mark{width:28px;height:28px;border-radius:6px;background:var(--accent);color:#fff;display:grid;
+  place-items:center;font-weight:700;font-size:12px}
+.topbar h1{font-size:15px;font-weight:600}
+.topbar h1 .sub{color:var(--muted);font-weight:400;margin-left:8px;font-size:13px}
+.clock{font-family:var(--mono);font-size:13px;color:var(--soft);padding:6px 10px;border:1px solid var(--border);
+  border-radius:6px;background:var(--inset)}
+.container{max-width:1280px;margin:0 auto;padding:28px 32px 64px}
+.tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.tab{background:none;border:none;color:var(--muted);padding:10px 14px;font-size:13px;font-weight:500;
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;font-family:var(--sans)}
+.tab:hover{color:var(--text)} .tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.page{display:none} .page.active{display:block}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 18px}
+.stat-label{font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:500}
+.stat-value{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:20px}
+.card-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;gap:16px;flex-wrap:wrap}
+.card-title{font-size:14px;font-weight:600}
+table{width:100%;border-collapse:collapse;text-align:left}
+thead th{padding:10px 14px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.06em;background:var(--inset);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+tbody td{padding:12px 14px;border-bottom:1px solid var(--border)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--inset)}
+td.mono{font-family:var(--mono);color:var(--soft);font-size:13px}
+.empty{text-align:center;padding:40px;color:var(--muted)}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px}
+.badge-green{background:var(--green-bg);color:var(--green)} .badge-blue{background:var(--blue-bg);color:var(--blue)}
+.badge-yellow{background:var(--yellow-bg);color:var(--yellow)} .badge-gray{background:var(--inset);color:var(--muted)}
+input,select{border:1px solid var(--border2);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans);background:var(--surface)}
+button,.btn{padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;border:1px solid var(--border2);
+  background:var(--surface);color:var(--text);cursor:pointer;font-family:var(--sans)}
+button:hover{background:var(--inset)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)} .btn-primary:hover{background:#18304d}
+.btn-danger{background:var(--red);color:#fff;border-color:var(--red)} .btn-danger:hover{opacity:.9;background:var(--red)}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pad{padding:16px 18px}
+.meter{background:var(--inset);border-radius:99px;height:6px;width:80px;overflow:hidden;display:inline-block;
+  vertical-align:middle;border:1px solid var(--border)}
+.meter-fill{height:100%;background:var(--green)}
+@media(max-width:900px){.stat-row{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand"><div class="brand-mark">OA</div><h1>Office Attendance<span class="sub">HR Console</span></h1></div>
+  <div class="clock" id="clock">--:--:--</div>
+</div>
+
+<div class="container">
+  <div class="tabs">
+    <div class="tab active" id="nav-daily" onclick="showTab('daily')">Daily Dashboard</div>
+    <div class="tab" id="nav-mark" onclick="showTab('mark')">Mark Attendance</div>
+    <div class="tab" id="nav-monthly" onclick="showTab('monthly')">Monthly Reports</div>
+    <div class="tab" id="nav-employees" onclick="showTab('employees')">Employees</div>
+  </div>
+
+  <!-- DAILY -->
+  <div id="daily" class="page active">
+    <div class="stat-row">
+      <div class="stat-card"><div class="stat-label">Present Today</div><div class="stat-value" id="s-present">—</div></div>
+      <div class="stat-card"><div class="stat-label">In Office Now</div><div class="stat-value" id="s-inoffice" style="color:var(--accent)">—</div></div>
+      <div class="stat-card"><div class="stat-label">Completed Hours</div><div class="stat-value" id="s-complete" style="color:var(--green)">—</div></div>
+      <div class="stat-card"><div class="stat-label">Short Hours</div><div class="stat-value" id="s-short" style="color:var(--red)">—</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Today's Attendance — <span id="today-date" style="color:var(--muted);font-weight:400"></span></div>
+        <button onclick="loadDaily()">Refresh</button>
+      </div>
+      <table><thead><tr><th>Employee</th><th>Entry</th><th>Exit</th><th>Status</th></tr></thead>
+        <tbody id="daily-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table>
+      <p style="font-size:12px;color:var(--muted);padding:10px 14px">Auto-refreshes every 30 seconds.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">History &amp; Export</div></div>
+      <div class="pad controls">
+        <label style="color:var(--muted)">View date</label>
+        <input type="date" id="hist-date"><button onclick="viewDate()">View</button>
+        <span style="width:16px"></span>
+        <label style="color:var(--muted)">Export</label>
+        <input type="date" id="exp-start"><span style="color:var(--muted)">to</span><input type="date" id="exp-end">
+        <button class="btn-primary" onclick="exportRange()">Download Excel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MARK ATTENDANCE -->
+  <div id="mark" class="page">
+    <div class="card"><div class="pad" style="color:var(--muted)">
+      Click <b>Start Camera</b> and look at the camera. First scan of the day = entry; an evening scan = exit.
+      Photos/screens are rejected by the liveness check.
+    </div></div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap">
+      <div style="flex:1;min-width:320px">
+        <div style="background:#1c1b18;border-radius:10px;overflow:hidden;aspect-ratio:4/3">
+          <video id="cam" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn-primary" id="cam-start" onclick="startCam()" style="padding:12px 20px;font-size:15px">▶ Start Camera</button>
+          <button id="cam-stop" onclick="stopCam()" style="display:none;padding:12px 20px;font-size:15px">⏹ Stop Camera</button>
+        </div>
+      </div>
+      <div style="flex:1;min-width:320px">
+        <div id="banner" style="padding:24px 18px;border-radius:10px;font-size:18px;font-weight:600;
+          background:var(--inset);border:1px solid var(--border);color:var(--muted);text-align:center">
+          Idle — click Start Camera
+        </div>
+        <div style="margin-top:16px">
+          <div class="card-title" style="margin-bottom:8px">Recent check-ins</div>
+          <div id="cam-log" style="font-family:var(--mono);font-size:13px;color:var(--soft)">
+            <div style="color:var(--muted)">None yet.</div></div>
+        </div>
+      </div>
+    </div>
+    <canvas id="cam-canvas" style="display:none"></canvas>
+  </div>
+
+  <!-- MONTHLY -->
+  <div id="monthly" class="page">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Monthly Attendance</div>
+        <div class="controls">
+          <input type="month" id="month-sel">
+          <button class="btn-primary" onclick="loadMonthly()">Generate</button>
+          <button onclick="exportMonthly()">Export Excel</button>
+        </div>
+      </div>
+      <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Attendance %</th></tr></thead>
+        <tbody id="monthly-body"><tr><td colspan="4" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <!-- EMPLOYEES -->
+  <div id="employees" class="page">
+    <div class="card">
+      <div class="card-head"><div class="card-title">Add New Employee</div></div>
+      <div class="pad" style="max-width:520px">
+        <p style="color:var(--muted);margin-bottom:14px">Enter a name and add 1–3 clear, front-facing photos
+          (webcam or upload). Learned instantly — they can mark attendance right away.</p>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <input type="text" id="enr-name" placeholder="Employee full name">
+          <div style="border:1px solid var(--border);border-radius:6px;padding:12px;background:var(--inset)">
+            <div style="display:flex;gap:8px;margin-bottom:10px">
+              <button onclick="enrStartCam()" id="enr-cam-btn" style="flex:1">Use Webcam</button>
+              <button class="btn-primary" onclick="enrCapture()" id="enr-cap-btn" style="flex:1;display:none">Capture Photo</button>
+            </div>
+            <video id="enr-video" autoplay playsinline muted style="width:100%;border-radius:6px;display:none;background:#000"></video>
+            <canvas id="enr-canvas" style="display:none"></canvas>
+            <div id="enr-preview" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"></div>
+          </div>
+          <div style="text-align:center;color:var(--muted);font-size:12px">— or upload —</div>
+          <input type="file" id="enr-files" multiple accept="image/*">
+          <button class="btn-primary" onclick="submitEnroll()" style="padding:12px">Add Employee</button>
+          <p id="enr-status" style="font-weight:600"></p>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">Registered Employees</div><button onclick="loadEmployees()">Refresh</button></div>
+      <table><thead><tr><th>Name</th><th>Employee ID</th><th>Action</th></tr></thead>
+        <tbody id="emp-body"><tr><td colspan="3" class="empty">Loading…</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script>
+const API = (window.API_BASE || "").replace(/\/$/, "");
+const todayStr = new Date().toISOString().slice(0,10);
+
+function clock(){const n=new Date();document.getElementById('clock').textContent=
+  n.toTimeString().slice(0,8);}
+setInterval(clock,1000);clock();
+document.getElementById('today-date').textContent =
+  new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+function showTab(id){
+  if(id!=='mark') stopCam();
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.getElementById('nav-'+id).classList.add('active');
+  if(id==='daily') loadDaily();
+  if(id==='monthly'){ if(!document.getElementById('month-sel').value)
+    document.getElementById('month-sel').value=todayStr.slice(0,7); }
+  if(id==='employees') loadEmployees();
+}
+
+function statusBadge(s){const m={'Complete':'badge-green','In office':'badge-blue','Short':'badge-yellow','Absent':'badge-gray'};
+  return `<span class="badge ${m[s]||'badge-gray'}">${s}</span>`;}
+
+// ---- Daily ----
+function loadDaily(){
+  const d=document.getElementById('hist-date').value||todayStr;
+  const ep = d===todayStr ? '/api/today' : '/api/date/'+d;
+  const tb=document.getElementById('daily-body');
+  fetch(API+ep).then(r=>r.json()).then(data=>{
+    document.getElementById('s-present').textContent  = data.filter(r=>r.status!=='Absent').length;
+    document.getElementById('s-inoffice').textContent = data.filter(r=>r.status==='In office').length;
+    document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
+    document.getElementById('s-short').textContent    = data.filter(r=>r.status==='Short').length;
+    if(!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No records for ${d}.</td></tr>`;return;}
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">${r.name}</td>
+      <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td>${statusBadge(r.status)}</td></tr>`).join('');
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="4" class="empty">Error loading data.</td></tr>`;});
+}
+function viewDate(){loadDaily();}
+function exportRange(){
+  const s=document.getElementById('exp-start').value,e=document.getElementById('exp-end').value;
+  if(!s||!e){alert('Pick start and end dates.');return;}
+  window.location.href=API+`/api/export?start=${s}&end=${e}`;
+}
+
+// ---- Monthly ----
+function loadMonthly(){
+  const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
+  const tb=document.getElementById('monthly-body');tb.innerHTML=`<tr><td colspan="4" class="empty">Loading…</td></tr>`;
+  fetch(API+`/api/monthly_report?month=${m}`).then(r=>r.json()).then(data=>{
+    if(!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No data for ${m}.</td></tr>`;return;}
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">${r.name}</td>
+      <td class="mono">${r.present_days}</td><td class="mono">${r.total_days}</td>
+      <td><span class="mono" style="font-weight:600">${r.percentage}</span></td></tr>`).join('');
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="4" class="empty">Error.</td></tr>`;});
+}
+function exportMonthly(){const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
+  window.location.href=API+`/api/export_monthly?month=${m}`;}
+
+// ---- Mark Attendance (browser camera) ----
+let camStream=null,camBusy=false,camTimer=null;
+function banner(state,text){const el=document.getElementById('banner');
+  const st={present:['var(--green-bg)','var(--green)'],spoof:['var(--red-bg)','var(--red)'],
+    unknown:['var(--yellow-bg)','var(--yellow)'],scan:['var(--accent-soft)','var(--accent)'],
+    idle:['var(--inset)','var(--muted)']}[state]||['var(--inset)','var(--muted)'];
+  el.style.background=st[0];el.style.color=st[1];el.textContent=text;}
+function startCam(){
+  navigator.mediaDevices.getUserMedia({video:{width:640}}).then(s=>{
+    camStream=s;document.getElementById('cam').srcObject=s;
+    document.getElementById('cam-start').style.display='none';
+    document.getElementById('cam-stop').style.display='inline-block';
+    banner('scan','Scanning… look at the camera');camTimer=setInterval(camTick,1200);
+  }).catch(e=>alert('Camera access denied or unavailable: '+e));
+}
+function stopCam(){
+  if(camTimer){clearInterval(camTimer);camTimer=null;}
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  const a=document.getElementById('cam-start'),b=document.getElementById('cam-stop');
+  if(a)a.style.display='inline-block';if(b)b.style.display='none';banner('idle','Idle — click Start Camera');
+}
+function camTick(){
+  if(camBusy||!camStream)return;const v=document.getElementById('cam');if(!v.videoWidth)return;
+  const c=document.getElementById('cam-canvas');const w=640,h=Math.round(v.videoHeight*640/v.videoWidth);
+  c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);
+  camBusy=true;
+  fetch(API+'/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({image:c.toDataURL('image/jpeg',0.8)})})
+    .then(r=>r.json()).then(handleScan).catch(()=>{}).finally(()=>{camBusy=false;});
+}
+function handleScan(res){
+  if(!res)return;
+  if(res.status==='present'){banner('present',`✅ ${res.name} — ${res.marked?'marked present':'already logged'}`);
+    if(res.marked)camLog(res.name);}
+  else if(res.status==='spoof')banner('spoof',`❌ Photo/screen rejected (liveness ${res.liveness})`);
+  else if(res.status==='unknown')banner('unknown','❓ Not recognised');
+  else if(res.status==='no_face')banner('scan','Scanning… look at the camera');
+  else banner('spoof',res.message||'Error');
+}
+function camLog(name){const el=document.getElementById('cam-log');
+  if(el.textContent.includes('None yet'))el.innerHTML='';
+  const row=document.createElement('div');row.textContent=`${new Date().toLocaleTimeString()} — ${name}`;
+  el.insertBefore(row,el.firstChild);loadDaily();}
+
+// ---- Employees ----
+let enrStream=null,enrShots=[];
+function enrStartCam(){
+  navigator.mediaDevices.getUserMedia({video:true}).then(s=>{enrStream=s;
+    const v=document.getElementById('enr-video');v.srcObject=s;v.style.display='block';
+    document.getElementById('enr-cam-btn').style.display='none';
+    document.getElementById('enr-cap-btn').style.display='block';
+  }).catch(()=>alert('Camera access denied.'));
+}
+function enrCapture(){
+  if(enrShots.length>=3){alert('Max 3 photos.');return;}
+  const v=document.getElementById('enr-video'),c=document.getElementById('enr-canvas');
+  c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+  const url=c.toDataURL('image/jpeg');enrShots.push(url);
+  const img=document.createElement('img');img.src=url;img.style.cssText='height:56px;border-radius:4px;border:1px solid var(--border)';
+  document.getElementById('enr-preview').appendChild(img);
+}
+function submitEnroll(){
+  const name=document.getElementById('enr-name').value.trim();
+  const files=document.getElementById('enr-files').files;
+  const st=document.getElementById('enr-status');
+  if(!name){st.textContent='Enter a name.';st.style.color='var(--red)';return;}
+  const total=files.length+enrShots.length;
+  if(total===0){st.textContent='Add at least one photo.';st.style.color='var(--red)';return;}
+  if(total>3){st.textContent='Max 3 photos total.';st.style.color='var(--red)';return;}
+  st.textContent='Processing…';st.style.color='var(--muted)';
+  Promise.all(Array.from(files).map(f=>new Promise((res,rej)=>{
+    const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(f);})))
+  .then(up=>{
+    st.textContent='Enrolling…';
+    return fetch(API+'/api/enroll_employee',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({employee_name:name,images:up.concat(enrShots)})}).then(r=>r.json());
+  }).then(res=>{
+    if(res.success){
+      st.textContent=`✓ ${name} added (${res.faces} photo(s) learned).`;st.style.color='var(--green)';
+      document.getElementById('enr-name').value='';document.getElementById('enr-files').value='';
+      enrShots=[];document.getElementById('enr-preview').innerHTML='';
+      if(enrStream){enrStream.getTracks().forEach(t=>t.stop());enrStream=null;
+        document.getElementById('enr-video').style.display='none';
+        document.getElementById('enr-cam-btn').style.display='block';
+        document.getElementById('enr-cap-btn').style.display='none';}
+      loadEmployees();
+    }else{st.textContent='Error: '+(res.error||'unknown');st.style.color='var(--red)';}
+  }).catch(()=>{st.textContent='Network error.';st.style.color='var(--red)';});
+}
+function loadEmployees(){
+  const tb=document.getElementById('emp-body');tb.innerHTML=`<tr><td colspan="3" class="empty">Loading…</td></tr>`;
+  fetch(API+'/api/list_employees').then(r=>r.json()).then(data=>{
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="3" class="empty">No employees registered.</td></tr>`;return;}
+    tb.innerHTML=data.map(e=>`<tr><td style="font-weight:500">${e.employee_name}</td>
+      <td class="mono">${e.employee_id}</td>
+      <td><button class="btn-danger" onclick="removeEmp('${e.employee_id}','${(e.employee_name||'').replace(/'/g,"\\'")}')">Remove</button></td></tr>`).join('');
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="3" class="empty">Error.</td></tr>`;});
+}
+function removeEmp(id,name){
+  if(!confirm(`Remove ${name}? This deletes their face data permanently.`))return;
+  fetch(API+'/api/remove_employee/'+id,{method:'DELETE'}).then(r=>r.json()).then(res=>{
+    if(res.success){loadEmployees();}else{alert('Error: '+(res.error||'unknown'));}
+  }).catch(()=>alert('Network error.'));
+}
+
+// init
+loadDaily();
+setInterval(()=>{if(document.getElementById('daily').classList.contains('active'))loadDaily();},30000);
+</script>
+</body>
+</html>
