@@ -48,10 +48,12 @@ def enrollment_worker_loop(attendance_processor):
                         print(f"[ENROLLMENT] Error processing image for {employee_name}: {e}")
                 
                 if embeddings:
-                    # Average the embeddings
-                    avg_emb = np.mean(embeddings, axis=0)
-                    # Insert into EmployeeDB
-                    emp_db.upsert(employee_id, employee_name, avg_emb.reshape(1, -1), len(embeddings))
+                    # Store EACH photo's embedding (shape N x 512), not the
+                    # average. match() compares against all and takes the best
+                    # cosine similarity, so keeping them separate is strictly
+                    # more accurate across different poses/lighting.
+                    emb_matrix = np.array(embeddings, dtype=np.float32).reshape(len(embeddings), -1)
+                    emp_db.upsert(employee_id, employee_name, emb_matrix, len(embeddings))
                     print(f"\n[ENROLLMENT] Successfully enrolled {employee_name} from cloud queue.\n")
                     # Update the live processor's in-memory db
                     attendance_processor._employee_db = emp_db.get_all()

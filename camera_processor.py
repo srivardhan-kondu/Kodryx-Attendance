@@ -190,8 +190,11 @@ def process_camera(camera_url, camera_name, employee_db,
                     if face_w < MIN_FACE_SIZE or face_h < MIN_FACE_SIZE:
                         continue
 
-                    # Anti-spoofing check
-                    if anti_spoofing is not None and anti_spoofing.available():
+                    # Anti-spoofing / liveness check.
+                    # Call whenever a checker is configured — check_liveness()
+                    # enforces its own fail-open/closed policy internally, so a
+                    # failed model load rejects instead of waving people through.
+                    if anti_spoofing is not None:
                         is_real, liveness_score = anti_spoofing.check_liveness(work_frame, face["box"])
                         if not is_real:
                             log.warning("[%s] SPOOF DETECTED! Score: %.2f. Rejecting attendance.", camera_name.upper(), liveness_score)
