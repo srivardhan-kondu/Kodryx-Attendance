@@ -1,1 +1,0 @@
-data/buffalo_l/*.onnx filter=lfs diff=lfs merge=lfs -text
