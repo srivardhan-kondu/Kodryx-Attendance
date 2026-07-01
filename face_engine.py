@@ -35,6 +35,7 @@ except ImportError:
 
 from sklearn.metrics.pairwise import cosine_similarity
 from config import (
+    BASE_DIR,
     FACE_RECOGNITION_MODEL,
     CONFIDENCE_THRESHOLD,
     EMBEDDINGS_FILE,
@@ -123,6 +124,7 @@ class FaceEngine:
             ctx_id = 0 if use_gpu else -1
             self._app = FaceAnalysis(
                 name=FACE_RECOGNITION_MODEL,
+                root=os.path.join(BASE_DIR, "data"),
                 allowed_modules=['detection', 'recognition'],
                 providers=providers,
             )

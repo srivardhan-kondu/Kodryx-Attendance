@@ -6,11 +6,11 @@ __pycache__/
 # Environment variables
 .env
 
-# Data and Logs
-data/
+# Data and Logs — keep model files, exclude runtime DBs and logs
+data/*.db
+data/*.jpg
+data/*.png
 logs/
 
-
 # AI Models
-
 venv/
