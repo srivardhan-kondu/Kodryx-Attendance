@@ -18,7 +18,7 @@ except ImportError:
 
 from config import FACE_RECOGNITION_MODEL, BASE_DIR, get_onnx_providers
 
-model_dir = os.path.join(BASE_DIR, "data", "buffalo_l")
+model_dir = os.path.join(BASE_DIR, "data", "models", "buffalo_l")
 print(f"Downloading InsightFace '{FACE_RECOGNITION_MODEL}' models (~325 MB)...")
 print(f"Saving to: {model_dir}")
 print("This only runs once — please wait...\n")
@@ -32,5 +32,5 @@ app = FaceAnalysis(
 app.prepare(ctx_id=-1, det_size=(640, 640))
 
 files = os.listdir(model_dir) if os.path.isdir(model_dir) else []
-print(f"\nDone! {len(files)} model files ready in data/buffalo_l/")
+print(f"\nDone! {len(files)} model files ready in data/models/buffalo_l/")
 print("You can now start the system:  python serve.py")
