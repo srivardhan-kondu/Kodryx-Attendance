@@ -52,7 +52,48 @@ def initialise_database():
     db = get_db()
     db.attendance_events.create_index([("employee_id", 1), ("work_date", 1)])
     db.daily_summary.create_index([("employee_id", 1), ("work_date", 1)], unique=True)
+    db.daily_backup.create_index("work_date", unique=True)
     print("[DB] Database initialised successfully via PyMongo.")
+
+
+def snapshot_daily_backup(work_date=None):
+    """
+    Consolidate a whole day's attendance into a single backup document in the
+    `daily_backup` collection (one doc per date). Called automatically after
+    every entry/exit so the archive always mirrors the live `daily_summary`,
+    and can also be run manually to rebuild a day.
+
+    Returns the number of employee records in the snapshot.
+    """
+    db = get_db()
+    work_date = work_date or strftime_today()
+
+    rows = list(db.daily_summary.find({"work_date": work_date}, {"_id": 0}))
+    records = [{
+        "employee_id":   r.get("employee_id"),
+        "employee_name": r.get("employee_name"),
+        "entry":         r.get("first_seen"),
+        "exit":          r.get("last_seen"),
+        "status":        r.get("status"),
+        "hours_worked":  r.get("hours_worked", 0.0),
+    } for r in rows]
+
+    db.daily_backup.update_one(
+        {"work_date": work_date},
+        {"$set": {
+            "work_date":     work_date,
+            "updated_at":    strftime_now(),
+            "total_present": len(records),
+            "records":       records,
+        }},
+        upsert=True,
+    )
+    return len(records)
+
+
+def get_daily_backup(work_date: str):
+    """Return the consolidated backup document for a given date (or None)."""
+    return get_db().daily_backup.find_one({"work_date": work_date}, {"_id": 0})
 
 
 def log_event(employee_id, employee_name, event_type, confidence, camera_source):
@@ -105,6 +146,7 @@ def log_presence_event(employee_id, employee_name, confidence, camera_source, fr
             "session_breakdown": None,
         })
         print(f"[DB] Entry (login): {employee_name} | {event_time}")
+        snapshot_daily_backup(work_date)
         return
 
     # Already checked in. Morning re-scans never count as an exit.
@@ -122,6 +164,7 @@ def log_presence_event(employee_id, employee_name, confidence, camera_source, fr
         {"$set": {"last_seen": event_time, "hours_worked": hours, "status": status}},
     )
     print(f"[DB] Exit (logout): {employee_name} | {event_time} | {hours:.2f}h")
+    snapshot_daily_backup(work_date)
 
 
 def get_last_event_type_today(employee_id):

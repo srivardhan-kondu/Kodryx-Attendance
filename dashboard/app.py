@@ -20,6 +20,7 @@ from flask import Flask, jsonify, send_file, request, send_from_directory
 from attendance_db import (
     get_today_summary, get_date_summary, export_to_excel,
     get_monthly_report, export_monthly_to_excel,
+    snapshot_daily_backup, get_daily_backup,
 )
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
@@ -63,6 +64,38 @@ def static_files(filename):
 @app.route("/api/health")
 def api_health():
     return jsonify({"ok": True})
+
+
+@app.route("/api/backup/<date_str>")
+def api_backup_get(date_str):
+    """Return the consolidated day-wise backup document for a date."""
+    doc = get_daily_backup(date_str)
+    if not doc:
+        return jsonify({"work_date": date_str, "total_present": 0, "records": []})
+    return jsonify(doc)
+
+
+@app.route("/api/backup/<date_str>", methods=["POST"])
+def api_backup_rebuild(date_str):
+    """Manually (re)build the backup snapshot for a date from daily_summary."""
+    count = snapshot_daily_backup(date_str)
+    return jsonify({"success": True, "work_date": date_str, "records": count})
+
+
+@app.route("/api/config")
+def api_config():
+    """Expose the live attendance rules so the UI can explain them accurately."""
+    from config import (
+        ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, COOLDOWN_MINUTES,
+        OFFICE_START_HOUR, OFFICE_END_HOUR,
+    )
+    return jsonify({
+        "split_hour": ATTENDANCE_SPLIT_HOUR,
+        "exit_min_gap_hours": EXIT_MIN_GAP_HOURS,
+        "cooldown_minutes": COOLDOWN_MINUTES,
+        "office_start_hour": OFFICE_START_HOUR,
+        "office_end_hour": OFFICE_END_HOUR,
+    })
 
 
 # ---------------------------------------------------------------

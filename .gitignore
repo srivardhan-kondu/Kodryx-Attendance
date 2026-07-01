@@ -10,8 +10,10 @@ __pycache__/
 data/*.db
 data/*.jpg
 data/*.png
+data/models/
 data/buffalo_l/
 logs/
+*.log
 
 # AI Models
 venv/

@@ -109,9 +109,26 @@ button:hover{background:var(--inset)}
 
   <!-- MARK ATTENDANCE -->
   <div id="mark" class="page">
-    <div class="card"><div class="pad" style="color:var(--muted)">
-      Click <b>Start Camera</b> and look at the camera. First scan of the day = entry; an evening scan = exit.
-      Photos/screens are rejected by the liveness check.
+    <div class="card"><div class="pad">
+      <div style="color:var(--muted);margin-bottom:14px">
+        Click <b>Start Camera</b> and look at the camera. Photos/screens are rejected by the liveness check.
+      </div>
+      <div class="card-title" style="margin-bottom:10px">How attendance is marked</div>
+      <div id="rules-grid" style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px;background:var(--green-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-weight:600;color:var(--green)">🟢 Entry (login)</div>
+          <div style="color:var(--soft);margin-top:4px" id="rule-entry">First scan of the day.</div>
+        </div>
+        <div style="flex:1;min-width:200px;background:var(--blue-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-weight:600;color:var(--blue)">🔵 Exit (logout)</div>
+          <div style="color:var(--soft);margin-top:4px" id="rule-exit">A later scan in the day.</div>
+        </div>
+        <div style="flex:1;min-width:200px;background:var(--inset);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-weight:600;color:var(--muted)">⏱ Anti-spam</div>
+          <div style="color:var(--soft);margin-top:4px" id="rule-cooldown">Repeat scans are ignored briefly.</div>
+        </div>
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="rule-note"></div>
     </div></div>
     <div style="display:flex;gap:24px;flex-wrap:wrap">
       <div style="flex:1;min-width:320px">
@@ -354,8 +371,31 @@ function removeEmp(id,name){
   }).catch(()=>alert('Network error.'));
 }
 
+// ---- Attendance rules panel (reads live backend config) ----
+function fmtHour(h){
+  const hr=Math.floor(h), mn=Math.round((h-hr)*60);
+  const ampm=hr>=12?'PM':'AM'; let h12=hr%12; if(h12===0)h12=12;
+  return `${h12}:${String(mn).padStart(2,'0')} ${ampm}`;
+}
+function loadRules(){
+  fetch(API+'/api/config').then(r=>r.json()).then(c=>{
+    const split=fmtHour(c.split_hour), gap=c.exit_min_gap_hours, cd=c.cooldown_minutes;
+    const gapTxt = gap>=1 ? `${gap} hr` : `${Math.round(gap*3600)} sec`;
+    document.getElementById('rule-entry').textContent =
+      `Your first scan of the day — recorded any time before ${split}.`;
+    document.getElementById('rule-exit').textContent =
+      `A scan at or after ${split}, at least ${gapTxt} after your entry.`;
+    document.getElementById('rule-cooldown').textContent =
+      `After a scan you're on cooldown for ${cd} min, so quick repeats don't double-log.`;
+    document.getElementById('rule-note').textContent =
+      `One camera can't tell arrival from departure, so the ${split} split decides entry vs exit. `+
+      `Office hours: ${fmtHour(c.office_start_hour)}–${fmtHour(c.office_end_hour)}.`;
+  }).catch(()=>{});
+}
+
 // init
 loadDaily();
+loadRules();
 setInterval(()=>{if(document.getElementById('daily').classList.contains('active'))loadDaily();},30000);
 </script>
 </body>
