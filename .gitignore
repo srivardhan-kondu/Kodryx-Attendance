@@ -9,11 +9,8 @@ __pycache__/
 # Data and Logs
 data/
 logs/
-exports/
-enrollment/
-employee gallery/
+
 
 # AI Models
-*.pt
-*.onnx
+
 venv/
