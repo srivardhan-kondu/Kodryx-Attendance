@@ -6,7 +6,8 @@ services:
   - type: web
     name: kodryx-hr-dashboard
     runtime: python
-    plan: starter              # cheap; no AI model loaded here
+    plan: free                 # $0, no card needed. Sleeps after 15 min idle;
+                                # first request after that takes ~30-50s to wake up.
     buildCommand: pip install -r requirements_cloud.txt
     startCommand: gunicorn dashboard.app:app --workers 1 --timeout 60 --bind 0.0.0.0:$PORT
     healthCheckPath: /api/health
