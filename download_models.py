@@ -18,7 +18,7 @@ except ImportError:
 
 from config import FACE_RECOGNITION_MODEL, BASE_DIR, get_onnx_providers
 
-model_dir = os.path.join(BASE_DIR, "data", "models", "buffalo_l")
+model_dir = os.path.join(BASE_DIR, "data", "models", FACE_RECOGNITION_MODEL)
 print(f"Downloading InsightFace '{FACE_RECOGNITION_MODEL}' models (~325 MB)...")
 print(f"Saving to: {model_dir}")
 print("This only runs once — please wait...\n")
