@@ -167,9 +167,13 @@ button:hover{background:var(--inset)}
         <div class="controls">
           <input type="month" id="month-sel">
           <button class="btn-primary" onclick="loadMonthly()">Generate</button>
-          <button onclick="exportMonthly()">Export Excel</button>
+          <button onclick="exportMonthly()">Export month</button>
+          <span style="width:12px"></span>
+          <button onclick="exportAll('month')">⬇ All employees (this month)</button>
+          <button class="btn-primary" onclick="exportAll('all')">⬇ All employees (entire history)</button>
         </div>
       </div>
+      <p style="font-size:12px;color:var(--muted);padding:2px 14px 10px">Tip: click any employee's name to open their full individual timesheet.</p>
       <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Total Hours</th><th>Attendance %</th></tr></thead>
         <tbody id="monthly-body"><tr><td colspan="5" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
     </div>
@@ -217,8 +221,12 @@ button:hover{background:var(--inset)}
         </div>
       </div>
       <div class="pad controls">
+        <label style="display:flex;align-items:center;gap:6px;color:var(--muted)">
+          <input type="checkbox" id="emp-alltime" checked onchange="toggleAllTime()"> Entire timesheet (all time)
+        </label>
+        <span style="width:8px"></span>
         <label style="color:var(--muted)">Month</label>
-        <input type="month" id="emp-detail-month">
+        <input type="month" id="emp-detail-month" disabled onchange="loadEmployeeDetail()">
         <button onclick="loadEmployeeDetail()">Load</button>
         <span style="width:16px"></span>
         <button class="btn-primary" onclick="downloadEmployee()">⬇ Download Excel</button>
@@ -235,8 +243,8 @@ button:hover{background:var(--inset)}
     <!-- Daily Tab -->
     <div id="emp-daily-view" class="card" style="display:none">
       <div class="pad">
-        <table><thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th></tr></thead>
-          <tbody id="emp-daily-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table>
+        <table><thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th><th>Note</th></tr></thead>
+          <tbody id="emp-daily-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table>
       </div>
     </div>
 
@@ -248,13 +256,11 @@ button:hover{background:var(--inset)}
       </div>
     </div>
 
-    <!-- Monthly Tab -->
+    <!-- Monthly Tab: per-month breakdown across the whole history -->
     <div id="emp-monthly-view" class="card" style="display:none">
-      <div class="pad" id="emp-monthly-summary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
-        <div><div style="color:var(--muted);font-size:12px">Present Days</div><div id="emp-monthly-present" style="font-size:24px;font-weight:600">—</div></div>
-        <div><div style="color:var(--muted);font-size:12px">Total Days</div><div id="emp-monthly-total" style="font-size:24px;font-weight:600">—</div></div>
-        <div><div style="color:var(--muted);font-size:12px">Total Hours</div><div id="emp-monthly-hours" style="font-size:24px;font-weight:600">—</div></div>
-        <div><div style="color:var(--muted);font-size:12px">Attendance %</div><div id="emp-monthly-pct" style="font-size:24px;font-weight:600">—</div></div>
+      <div class="pad">
+        <table><thead><tr><th>Month</th><th>Days Present</th><th>Working Days</th><th>Total Hours</th><th>Attendance %</th></tr></thead>
+          <tbody id="emp-monthly-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table>
       </div>
     </div>
   </div>
@@ -376,17 +382,37 @@ function loadMonthly(){
 }
 function exportMonthly(){const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
   window.location.href=API+`/api/export_monthly?month=${m}`;}
+// Master export of ALL employees — either the selected month or entire history.
+function exportAll(scope){
+  let m='all';
+  if(scope==='month'){ m=document.getElementById('month-sel').value; if(!m){alert('Pick a month first.');return;} }
+  window.location.href=API+`/api/export_all/${m}`;
+}
 
 // ---- Employee Details ----
-let empDetailId=null, empDetailName=null, empDetailMonth=null;
+let empDetailId=null, empDetailName=null;
 function viewEmployeeDetail(empId, empName, month){
   empDetailId=empId; empDetailName=empName;
   document.getElementById('emp-detail-name').textContent=empName;
-  document.getElementById('emp-detail-month').value=month||localDateStr().slice(0,7);
-  empDetailMonth=document.getElementById('emp-detail-month').value;
+  // Default to the ENTIRE timesheet. If opened from a specific month, narrow to it.
+  const allBox=document.getElementById('emp-alltime');
+  if(month){ allBox.checked=false; document.getElementById('emp-detail-month').value=month; }
+  else{ allBox.checked=true; }
+  toggleAllTime();          // syncs the month input's enabled state
   document.getElementById('nav-emp-detail').style.display='block';
   showTab('emp-detail');
   loadEmployeeDetail();
+}
+function toggleAllTime(){
+  const all=document.getElementById('emp-alltime').checked;
+  const mi=document.getElementById('emp-detail-month');
+  mi.disabled=all;
+  if(!all && !mi.value) mi.value=localDateStr().slice(0,7);
+}
+// Returns 'all' or the chosen 'YYYY-MM'.
+function empScope(){
+  return document.getElementById('emp-alltime').checked
+    ? 'all' : (document.getElementById('emp-detail-month').value || 'all');
 }
 function goBackEmployee(){
   empDetailId=null; empDetailName=null;
@@ -395,9 +421,7 @@ function goBackEmployee(){
 }
 function downloadEmployee(){
   if(!empDetailId){alert('Open an employee first.');return;}
-  const m=document.getElementById('emp-detail-month').value;
-  if(!m){alert('Pick a month.');return;}
-  window.location.href=API+`/api/employee/${empDetailId}/export/${m}`;
+  window.location.href=API+`/api/employee/${empDetailId}/export/${empScope()}`;
 }
 let empCurrentTab='daily';
 function showEmployeeTab(tab){
@@ -411,20 +435,18 @@ function showEmployeeTab(tab){
 }
 function loadEmployeeDetail(){
   if(!empDetailId) return;
-  empDetailMonth=document.getElementById('emp-detail-month').value;
-  if(!empDetailMonth){alert('Pick a month.');return;}
-  const m=empDetailMonth;
+  const m=empScope();
 
-  // Load Daily
+  // Daily (entire timesheet or one month) — includes notes
   fetch(API+`/api/employee/${empDetailId}/daily/${m}`).then(r=>r.json()).then(data=>{
     const tb=document.getElementById('emp-daily-body');
-    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No records</td></tr>`;return;}
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="6" class="empty">No records</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr><td class="mono">${r.work_date}</td>
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td>
-      <td>${statusBadge(r.status)}</td></tr>`).join('');
-  }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="5" class="empty">Error</td></tr>`;});
+      <td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--muted)">${r.note?escapeHtml(r.note):''}</td></tr>`).join('');
+  }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="6" class="empty">Error</td></tr>`;});
 
-  // Load Weekly
+  // Weekly
   fetch(API+`/api/employee/${empDetailId}/weekly/${m}`).then(r=>r.json()).then(data=>{
     const tb=document.getElementById('emp-weekly-body');
     if(!data||!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No records</td></tr>`;return;}
@@ -432,17 +454,14 @@ function loadEmployeeDetail(){
       <td class="mono">${w.start_date}</td><td>${w.days_present}</td><td class="mono">${fmtHM(w.total_hours)}</td></tr>`).join('');
   }).catch(()=>{document.getElementById('emp-weekly-body').innerHTML=`<tr><td colspan="4" class="empty">Error</td></tr>`;});
 
-  // Load Monthly
-  fetch(API+`/api/employee/${empDetailId}/monthly/${m}`).then(r=>r.json()).then(data=>{
-    if(data.error){
-      document.getElementById('emp-monthly-summary').innerHTML=`<div style="grid-column:1/-1;color:var(--muted)">No records for this month.</div>`;
-      return;
-    }
-    document.getElementById('emp-monthly-present').textContent=data.present_days;
-    document.getElementById('emp-monthly-total').textContent=data.total_days;
-    document.getElementById('emp-monthly-hours').textContent=fmtHM(data.total_hours);
-    document.getElementById('emp-monthly-pct').textContent=data.percentage;
-  }).catch(()=>{document.getElementById('emp-monthly-summary').innerHTML=`<div style="grid-column:1/-1;color:var(--muted)">Error loading data.</div>`;});
+  // Monthly — always a per-month breakdown across the whole history
+  fetch(API+`/api/employee/${empDetailId}/monthly_breakdown`).then(r=>r.json()).then(data=>{
+    const tb=document.getElementById('emp-monthly-body');
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No records</td></tr>`;return;}
+    tb.innerHTML=data.map(b=>`<tr><td class="mono">${b.month}</td>
+      <td>${b.present_days}</td><td>${b.total_days}</td><td class="mono">${fmtHM(b.total_hours)}</td>
+      <td><span class="mono" style="font-weight:600">${b.percentage}</span></td></tr>`).join('');
+  }).catch(()=>{document.getElementById('emp-monthly-body').innerHTML=`<tr><td colspan="5" class="empty">Error</td></tr>`;});
 
   showEmployeeTab('daily');
 }

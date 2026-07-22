@@ -443,18 +443,40 @@ def get_monthly_report(month_str: str):
     return report
 
 
-def get_employee_daily(employee_id: str, month_str: str):
-    """Get employee's daily attendance records for a month (YYYY-MM)."""
+def _is_all(month_str):
+    return not month_str or str(month_str).lower() == "all"
+
+
+def get_employee_daily(employee_id: str, month_str: str = None):
+    """Employee's daily attendance — for one month (YYYY-MM) or, if month_str
+    is None/'all', their ENTIRE timesheet. Includes HR notes and the
+    Auto-logout flag for past days where they forgot to log off."""
     db = get_db()
-    docs = list(db.daily_summary.find(
-        {"employee_id": employee_id, "work_date": {"$regex": f"^{month_str}-"}},
-        {"_id": 0}
-    ).sort("work_date", 1))
-    return [_summary_row(d) for d in docs]
+    query = {"employee_id": employee_id}
+    note_q = {"employee_id": employee_id}
+    if not _is_all(month_str):
+        query["work_date"] = {"$regex": f"^{month_str}-"}
+        note_q["work_date"] = {"$regex": f"^{month_str}-"}
+    docs = list(db.daily_summary.find(query, {"_id": 0}).sort("work_date", 1))
+    notes = {n["work_date"]: n.get("note", "")
+             for n in db.attendance_notes.find(note_q, {"_id": 0})}
+    today = strftime_today()
+
+    rows = []
+    for d in docs:
+        row = _summary_row(d)
+        wd = d.get("work_date")
+        if (wd and wd < today and d.get("first_seen") and not d.get("last_seen")
+                and row["status"] == "In office"):
+            row["status"] = "Auto logout"
+            row["auto"] = True
+        row["note"] = notes.get(wd, "")
+        rows.append(row)
+    return rows
 
 
-def get_employee_weekly(employee_id: str, month_str: str):
-    """Get employee's weekly attendance for a month. Groups daily records by week."""
+def get_employee_weekly(employee_id: str, month_str: str = None):
+    """Employee's weekly totals — for one month or their entire history."""
     from datetime import datetime
     docs = get_employee_daily(employee_id, month_str)
 
@@ -512,6 +534,40 @@ def get_employee_monthly(employee_id: str, month_str: str):
     }
 
 
+def get_employee_monthly_breakdown(employee_id: str):
+    """One summary row PER MONTH the employee has any record — used for the
+    'entire timesheet' Monthly tab."""
+    db = get_db()
+    docs = list(db.daily_summary.find(
+        {"employee_id": employee_id},
+        {"_id": 0, "work_date": 1, "status": 1, "hours_worked": 1},
+    ))
+    present_statuses = {"Complete", "In office"}
+    months = {}
+    for d in docs:
+        mkey = (d.get("work_date") or "")[:7]
+        if not mkey:
+            continue
+        agg = months.setdefault(mkey, {"present": 0, "hours": 0.0})
+        if d.get("status") in present_statuses:
+            agg["present"] += 1
+        agg["hours"] += float(d.get("hours_worked") or 0.0)
+
+    out = []
+    for mkey in sorted(months):
+        wd = working_days_in_month(mkey)
+        present = months[mkey]["present"]
+        pct = min(100.0, round((present / wd) * 100, 1)) if wd else 0.0
+        out.append({
+            "month": mkey,
+            "present_days": present,
+            "total_days": wd,
+            "total_hours": round(months[mkey]["hours"], 1),
+            "percentage": f"{pct}%",
+        })
+    return out
+
+
 def _fmt_hm(dec):
     """Decimal hours -> 'Xh Ym'."""
     dec = float(dec or 0.0)
@@ -524,21 +580,22 @@ def _fmt_hm(dec):
 
 
 def export_employee_to_excel(employee_id: str, month_str: str, filepath: str):
-    """Export one employee's Daily + Weekly + Monthly attendance to a 3-sheet Excel."""
+    """Export one employee's Daily + Weekly + Monthly attendance to a 3-sheet
+    Excel. month_str None/'all' => their entire timesheet."""
     import pandas as pd
     daily = get_employee_daily(employee_id, month_str)
     weekly = get_employee_weekly(employee_id, month_str)
-    monthly = get_employee_monthly(employee_id, month_str)
 
     with pd.ExcelWriter(filepath) as writer:
-        # --- Daily sheet ---
+        # --- Daily sheet (full timesheet, includes any HR note) ---
         if daily:
             df_d = pd.DataFrame([{
                 "Date": r["work_date"], "Entry": r["entry"], "Exit": r["exit"],
                 "Hours": _fmt_hm(r["hours"]), "Status": r["status"],
+                "Note": r.get("note", ""),
             } for r in daily])
         else:
-            df_d = pd.DataFrame(columns=["Date", "Entry", "Exit", "Hours", "Status"])
+            df_d = pd.DataFrame(columns=["Date", "Entry", "Exit", "Hours", "Status", "Note"])
         df_d.to_excel(writer, sheet_name="Daily", index=False)
 
         # --- Weekly sheet ---
@@ -551,17 +608,63 @@ def export_employee_to_excel(employee_id: str, month_str: str, filepath: str):
             df_w = pd.DataFrame(columns=["Week", "Start Date", "Days Present", "Total Hours"])
         df_w.to_excel(writer, sheet_name="Weekly", index=False)
 
-        # --- Monthly sheet ---
-        if monthly:
-            df_m = pd.DataFrame([{
-                "Employee": monthly["employee_name"], "Month": monthly["month"],
-                "Present Days": monthly["present_days"], "Working Days": monthly["total_days"],
-                "Total Hours": _fmt_hm(monthly["total_hours"]), "Attendance %": monthly["percentage"],
-            }])
+        # --- Monthly sheet: single month, or a per-month breakdown for all-time ---
+        if _is_all(month_str):
+            breakdown = get_employee_monthly_breakdown(employee_id)
+            rows = [{
+                "Month": b["month"], "Present Days": b["present_days"],
+                "Working Days": b["total_days"], "Total Hours": _fmt_hm(b["total_hours"]),
+                "Attendance %": b["percentage"],
+            } for b in breakdown]
+            df_m = pd.DataFrame(rows) if rows else pd.DataFrame(
+                columns=["Month", "Present Days", "Working Days", "Total Hours", "Attendance %"])
         else:
-            df_m = pd.DataFrame(columns=["Employee", "Month", "Present Days",
-                                         "Working Days", "Total Hours", "Attendance %"])
+            monthly = get_employee_monthly(employee_id, month_str)
+            if monthly:
+                df_m = pd.DataFrame([{
+                    "Employee": monthly["employee_name"], "Month": monthly["month"],
+                    "Present Days": monthly["present_days"], "Working Days": monthly["total_days"],
+                    "Total Hours": _fmt_hm(monthly["total_hours"]), "Attendance %": monthly["percentage"],
+                }])
+            else:
+                df_m = pd.DataFrame(columns=["Employee", "Month", "Present Days",
+                                             "Working Days", "Total Hours", "Attendance %"])
         df_m.to_excel(writer, sheet_name="Monthly", index=False)
+
+    return filepath
+
+
+def export_all_employees_to_excel(filepath: str, month_str: str = None):
+    """Master export of EVERY employee. month_str None/'all' => entire history.
+    Sheet 1: a Summary row per employee. Sheet 2: all daily records combined."""
+    import pandas as pd
+    employees = get_registered_employees()
+    present_statuses = {"Complete", "In office"}
+
+    summary_rows, all_rows = [], []
+    for eid, name in sorted(employees.items(), key=lambda kv: (kv[1] or "").lower()):
+        daily = get_employee_daily(eid, month_str)
+        present = sum(1 for r in daily if r["status"] in present_statuses)
+        hours = round(sum(r["hours"] for r in daily), 1)
+        summary_rows.append({
+            "Employee": name, "Days Present": present,
+            "Total Hours": _fmt_hm(hours), "Records": len(daily),
+        })
+        for r in daily:
+            all_rows.append({
+                "Employee": name, "Date": r["work_date"], "Entry": r["entry"],
+                "Exit": r["exit"], "Hours": _fmt_hm(r["hours"]),
+                "Status": r["status"], "Note": r.get("note", ""),
+            })
+    all_rows.sort(key=lambda x: (x["Date"], x["Employee"]))
+
+    with pd.ExcelWriter(filepath) as writer:
+        (pd.DataFrame(summary_rows) if summary_rows else
+         pd.DataFrame(columns=["Employee", "Days Present", "Total Hours", "Records"])
+         ).to_excel(writer, sheet_name="Summary", index=False)
+        (pd.DataFrame(all_rows) if all_rows else
+         pd.DataFrame(columns=["Employee", "Date", "Entry", "Exit", "Hours", "Status", "Note"])
+         ).to_excel(writer, sheet_name="All Records", index=False)
 
     return filepath
 

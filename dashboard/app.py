@@ -226,15 +226,35 @@ def api_employee_monthly(emp_id, month):
     return jsonify(result)
 
 
+@app.route("/api/employee/<emp_id>/monthly_breakdown")
+def api_employee_monthly_breakdown(emp_id):
+    """One summary row per month across the employee's entire history."""
+    from attendance_db import get_employee_monthly_breakdown
+    return jsonify(get_employee_monthly_breakdown(emp_id))
+
+
 @app.route("/api/employee/<emp_id>/export/<month>")
 def api_employee_export(emp_id, month):
-    """Download one employee's Daily+Weekly+Monthly attendance as Excel."""
+    """Download one employee's attendance as Excel. month can be 'all'."""
     from attendance_db import export_employee_to_excel
     tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
     tmp.close()
     export_employee_to_excel(emp_id, month, tmp.name)
+    tag = "all-time" if str(month).lower() == "all" else month
     return send_file(tmp.name, as_attachment=True,
-                     download_name=f"{emp_id}_{month}_attendance.xlsx")
+                     download_name=f"{emp_id}_{tag}_attendance.xlsx")
+
+
+@app.route("/api/export_all/<month>")
+def api_export_all(month):
+    """Master Excel of ALL employees. month can be 'all' for entire history."""
+    from attendance_db import export_all_employees_to_excel
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    tmp.close()
+    export_all_employees_to_excel(tmp.name, month)
+    tag = "all-time" if str(month).lower() == "all" else month
+    return send_file(tmp.name, as_attachment=True,
+                     download_name=f"All_Employees_{tag}_attendance.xlsx")
 
 
 @app.route("/api/export")
