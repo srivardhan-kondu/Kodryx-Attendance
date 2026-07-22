@@ -243,8 +243,8 @@ button:hover{background:var(--inset)}
     <!-- Daily Tab -->
     <div id="emp-daily-view" class="card" style="display:none">
       <div class="pad">
-        <table><thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th><th>Note</th></tr></thead>
-          <tbody id="emp-daily-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody></table>
+        <table><thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th><th>Note</th><th id="emp-th-action" style="display:none">Action</th></tr></thead>
+          <tbody id="emp-daily-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table>
       </div>
     </div>
 
@@ -353,13 +353,15 @@ function loadDaily(){
 }
 function viewDate(){loadDaily();}
 function goToday(){ document.getElementById('hist-date').value=''; loadDaily(); }
-// HR optional note (e.g. leave reason) for a person on the viewed day.
-function editNote(empId,name,current){
-  const note=prompt(`Note for ${name} on ${curDate}\n(e.g. "On approved leave", "Half day - sick". Leave blank to clear.)`, current||'');
+// HR optional note (e.g. leave reason). date omitted -> Daily Dashboard's
+// viewed day; date given -> that day from an employee's profile timesheet.
+function editNote(empId,name,current,date){
+  const wd=date||curDate, fromProfile=!!date;
+  const note=prompt(`Note for ${name} on ${wd}\n(e.g. "On approved leave", "Half day - sick". Leave blank to clear.)`, current||'');
   if(note===null) return;                    // cancelled
   fetch(API+'/api/note',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({employee_id:empId,work_date:curDate,note:note})})
-    .then(r=>r.json()).then(res=>{ if(res.success){loadDaily();} else alert('Error: '+(res.error||'unknown')); })
+    body:JSON.stringify({employee_id:empId,work_date:wd,note:note})})
+    .then(r=>r.json()).then(res=>{ if(res.success){ fromProfile?loadEmployeeDetail():loadDaily(); } else alert('Error: '+(res.error||'unknown')); })
     .catch(()=>alert('Network error.'));
 }
 function exportRange(){
@@ -437,14 +439,19 @@ function loadEmployeeDetail(){
   if(!empDetailId) return;
   const m=empScope();
 
-  // Daily (entire timesheet or one month) — includes notes
+  // Daily (entire timesheet or one month) — includes notes; editable for HR
   fetch(API+`/api/employee/${empDetailId}/daily/${m}`).then(r=>r.json()).then(data=>{
     const tb=document.getElementById('emp-daily-body');
-    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="6" class="empty">No records</td></tr>`;return;}
+    const cols=editMode?7:6;
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr><td class="mono">${r.work_date}</td>
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td>
-      <td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--muted)">${r.note?escapeHtml(r.note):''}</td></tr>`).join('');
-  }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="6" class="empty">Error</td></tr>`;});
+      <td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--muted)">${r.note?escapeHtml(r.note):''}</td>
+      ${editMode?`<td style="white-space:nowrap">
+        <button onclick="editRow('${empDetailId}',${JSON.stringify(empDetailName)},'${r.entry_raw||''}','${r.exit_raw||''}','${r.work_date}','profile')">Edit</button>
+        <button onclick="editNote('${empDetailId}',${JSON.stringify(empDetailName)},${JSON.stringify(r.note||'')},'${r.work_date}')">${r.note?'Note ✎':'+ Note'}</button>
+      </td>`:''}</tr>`).join('');
+  }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="7" class="empty">Error</td></tr>`;});
 
   // Weekly
   fetch(API+`/api/employee/${empDetailId}/weekly/${m}`).then(r=>r.json()).then(data=>{
@@ -618,25 +625,29 @@ function renameEmp(id,oldName){
 }
 
 // ---- HR correction editor (fix wrong/accidental entry or exit) ----
-let editEmpId=null;
-function editRow(empId,name,entryRaw,exitRaw){
+// Works from the Daily Dashboard AND from an employee's profile timesheet.
+let editEmpId=null, editDate=null, editContext='daily';
+function editRow(empId,name,entryRaw,exitRaw,date,context){
   editEmpId=empId;
-  document.getElementById('edit-title').textContent='Edit — '+name;
+  editDate=date||curDate;
+  editContext=context||'daily';
+  document.getElementById('edit-title').textContent=`Edit — ${name}  (${editDate})`;
   document.getElementById('edit-entry').value=entryRaw||'';
   document.getElementById('edit-exit').value=exitRaw||'';
   document.getElementById('edit-status').textContent='';
   document.getElementById('edit-modal').style.display='flex';
 }
 function closeEdit(){document.getElementById('edit-modal').style.display='none';editEmpId=null;}
+function afterEditReload(){ if(editContext==='profile') loadEmployeeDetail(); else loadDaily(); }
 function saveCorrection(){
   const entry=document.getElementById('edit-entry').value;
   const exit=document.getElementById('edit-exit').value;
   const st=document.getElementById('edit-status');
   st.textContent='Saving…';st.style.color='var(--muted)';
   fetch(API+'/api/correct',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({employee_id:editEmpId,work_date:curDate,entry_time:entry,exit_time:exit})})
+    body:JSON.stringify({employee_id:editEmpId,work_date:editDate,entry_time:entry,exit_time:exit})})
     .then(r=>r.json()).then(res=>{
-      if(res.success){closeEdit();loadDaily();}
+      if(res.success){closeEdit();afterEditReload();}
       else{st.style.color='var(--red)';st.textContent=res.error||'Error saving.';}
     }).catch(()=>{st.style.color='var(--red)';st.textContent='Network error.';});
 }
@@ -646,7 +657,9 @@ function saveCorrection(){
 // again if the backend reports this is the protected admin dashboard.
 function enableEditControls(){
   const th=document.getElementById('th-action'); if(th) th.style.display='';
+  const eth=document.getElementById('emp-th-action'); if(eth) eth.style.display='';
   if(document.getElementById('daily').classList.contains('active')) loadDaily();
+  if(document.getElementById('emp-detail').classList.contains('active') && empDetailId) loadEmployeeDetail();
 }
 
 // init
