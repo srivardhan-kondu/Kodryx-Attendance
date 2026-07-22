@@ -308,6 +308,7 @@ function showTab(id){
 function statusBadge(s){const m={'Complete':'badge-green','In office':'badge-blue','Absent':'badge-gray','Leave':'badge-gray','Auto logout':'badge-red'};
   const label = (s==='Auto logout') ? 'Auto logout ⚠' : s;
   return `<span class="badge ${m[s]||'badge-gray'}" title="${s==='Auto logout'?'Employee forgot to log off — hours not counted. HR should edit the real timing.':''}">${label}</span>`;}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 // Decimal hours (e.g. 7.72) -> "7h 43m" so nobody misreads the .72 as minutes.
 function fmtHM(dec){
   dec = Number(dec)||0;
@@ -333,13 +334,28 @@ function loadDaily(){
     document.getElementById('s-inoffice').textContent = data.filter(r=>r.status==='In office').length;
     document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
     if(!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records for ${d}.</td></tr>`;return;}
-    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)})">${r.name}</td>
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">
+        <span style="cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)})">${r.name}</span>
+        ${r.note?`<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px">📝 ${escapeHtml(r.note)}</div>`:''}
+      </td>
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td><td>${statusBadge(r.status)}</td>
-      ${editMode?`<td><button onclick="editRow('${r.employee_id}',${JSON.stringify(r.name)},'${r.entry_raw||''}','${r.exit_raw||''}')">Edit</button></td>`:''}</tr>`).join('');
+      ${editMode?`<td style="white-space:nowrap">
+        <button onclick="editRow('${r.employee_id}',${JSON.stringify(r.name)},'${r.entry_raw||''}','${r.exit_raw||''}')">Edit</button>
+        <button onclick="editNote('${r.employee_id}',${JSON.stringify(r.name)},${JSON.stringify(r.note||'')})">${r.note?'Note ✎':'+ Note'}</button>
+      </td>`:''}</tr>`).join('');
   }).catch(()=>{tb.innerHTML=`<tr><td colspan="${cols}" class="empty">Error loading data.</td></tr>`;});
 }
 function viewDate(){loadDaily();}
 function goToday(){ document.getElementById('hist-date').value=''; loadDaily(); }
+// HR optional note (e.g. leave reason) for a person on the viewed day.
+function editNote(empId,name,current){
+  const note=prompt(`Note for ${name} on ${curDate}\n(e.g. "On approved leave", "Half day - sick". Leave blank to clear.)`, current||'');
+  if(note===null) return;                    // cancelled
+  fetch(API+'/api/note',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({employee_id:empId,work_date:curDate,note:note})})
+    .then(r=>r.json()).then(res=>{ if(res.success){loadDaily();} else alert('Error: '+(res.error||'unknown')); })
+    .catch(()=>alert('Network error.'));
+}
 function exportRange(){
   const s=document.getElementById('exp-start').value,e=document.getElementById('exp-end').value;
   if(!s||!e){alert('Pick start and end dates.');return;}

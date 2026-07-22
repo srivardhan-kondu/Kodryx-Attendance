@@ -120,6 +120,20 @@ def api_correct():
     return jsonify({"success": True, "record": rec})
 
 
+@app.route("/api/note", methods=["POST"])
+def api_note():
+    """HR adds/updates/clears an optional note for a person on a date
+    (e.g. the reason they were on leave). Works even if there's no scan."""
+    data = request.get_json(silent=True) or {}
+    emp_id = data.get("employee_id")
+    work_date = data.get("work_date")
+    if not emp_id or not work_date:
+        return jsonify({"success": False, "error": "employee_id and work_date are required."}), 400
+    from attendance_db import set_attendance_note
+    note = set_attendance_note(emp_id, work_date, data.get("note", ""))
+    return jsonify({"success": True, "note": note})
+
+
 @app.route("/api/backup/<date_str>")
 def api_backup_get(date_str):
     """Return the consolidated day-wise backup document for a date."""

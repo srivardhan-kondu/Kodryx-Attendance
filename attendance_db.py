@@ -4,6 +4,7 @@
 # =============================================================
 
 import os
+import calendar
 from datetime import datetime, date
 import pandas as pd
 import pickle
@@ -11,13 +12,43 @@ from pymongo import MongoClient
 
 from tz_utils import strftime_today, strftime_now, now_ist
 from config import (
-    MONTHLY_WORKING_DAYS, EMBEDDINGS_FILE,
+    EMBEDDINGS_FILE,
     ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, MONGO_URI,
     ABSENT_CUTOFF_HOUR,
 )
 
 _client = None
 _db = None
+
+
+# ---------------------------------------------------------------
+# Working-day policy (effective July 2026):
+#   * Monday–Saturday are working days
+#   * Sunday is off
+#   * Every 2nd Saturday of the month is a holiday
+# ---------------------------------------------------------------
+def is_working_day(work_date) -> bool:
+    """work_date: 'YYYY-MM-DD' string or a date/datetime."""
+    if isinstance(work_date, str):
+        d = datetime.strptime(work_date, "%Y-%m-%d").date()
+    elif isinstance(work_date, datetime):
+        d = work_date.date()
+    else:
+        d = work_date
+    wd = d.weekday()            # Mon=0 … Sun=6
+    if wd == 6:                 # Sunday off
+        return False
+    if wd == 5:                 # Saturday: 2nd Saturday (days 8–14) is a holiday
+        if (d.day - 1) // 7 == 1:
+            return False
+    return True
+
+
+def working_days_in_month(month_str: str) -> int:
+    """Count working days in a 'YYYY-MM' month per the policy above."""
+    y, m = (int(x) for x in month_str.split("-"))
+    last = calendar.monthrange(y, m)[1]
+    return sum(1 for day in range(1, last + 1) if is_working_day(date(y, m, day)))
 
 
 def _hours_between(start_str, end_str):
@@ -223,11 +254,12 @@ def _summaries_for(target_date):
     # Absence rule: enrolled employees with no record are marked Absent once the
     # cutoff has passed — always for past days, and after ABSENT_CUTOFF_HOUR today.
     # (Before the cutoff today they simply don't appear yet — they may still arrive.)
+    # Non-working days (Sunday / 2nd Saturday) are holidays: nobody is Absent.
     now = now_ist()
     past_cutoff = (target_date < today) or (
         target_date == today and (now.hour + now.minute / 60.0) >= ABSENT_CUTOFF_HOUR
     )
-    if past_cutoff and target_date <= today:
+    if past_cutoff and target_date <= today and is_working_day(target_date):
         present_ids = {r.get("employee_id") for r in docs}
         absentees = [
             {"employee_id": eid, "name": name, "work_date": target_date,
@@ -238,7 +270,40 @@ def _summaries_for(target_date):
         ]
         absentees.sort(key=lambda r: (r["name"] or "").lower())
         rows.extend(absentees)
+
+    # Attach HR notes (optional per-person, per-day remark, e.g. leave reason).
+    notes = _notes_for(target_date)
+    for r in rows:
+        r["note"] = notes.get(r.get("employee_id"), "")
     return rows
+
+
+# ---------------------------------------------------------------
+# HR notes — optional per-person, per-day remark (e.g. leave reason).
+# Stored separately so a note can attach to a day with no scan record.
+# ---------------------------------------------------------------
+def _notes_for(target_date):
+    db = get_db()
+    return {
+        n["employee_id"]: n.get("note", "")
+        for n in db.attendance_notes.find({"work_date": target_date}, {"_id": 0})
+    }
+
+
+def set_attendance_note(employee_id, work_date, note):
+    """Add/update (or clear, if blank) an HR note for a person on a date."""
+    db = get_db()
+    note = (note or "").strip()
+    if note:
+        db.attendance_notes.update_one(
+            {"employee_id": employee_id, "work_date": work_date},
+            {"$set": {"note": note, "updated_at": strftime_now()}},
+            upsert=True,
+        )
+    else:
+        db.attendance_notes.delete_one(
+            {"employee_id": employee_id, "work_date": work_date})
+    return note
 
 
 def get_today_summary():
@@ -347,9 +412,10 @@ def get_monthly_report(month_str: str):
     employees = get_registered_employees()
     report = []
     db = get_db()
-    
+
     present_statuses = {'Complete', 'In office', 'Late Entry',
                         'Early Exit', 'Late & Early', 'Present'}
+    working_days = working_days_in_month(month_str)   # Mon–Sat minus 2nd Saturday
 
     for emp_id, emp_name in employees.items():
         docs = list(db.daily_summary.find(
@@ -361,14 +427,14 @@ def get_monthly_report(month_str: str):
         # stay uncounted until HR edits the real timing.
         total_hours = round(sum(float(d.get("hours_worked") or 0.0) for d in docs), 1)
 
-        pct = (present_days / MONTHLY_WORKING_DAYS) * 100
+        pct = (present_days / working_days) * 100 if working_days else 0.0
         pct = min(100.0, round(pct, 1))
 
         report.append({
             "employee_id": emp_id,
             "name": emp_name,
             "present_days": present_days,
-            "total_days": MONTHLY_WORKING_DAYS,
+            "total_days": working_days,
             "total_hours": total_hours,
             "percentage": f"{pct}%"
         })
@@ -431,7 +497,8 @@ def get_employee_monthly(employee_id: str, month_str: str):
     present_statuses = {"Complete", "In office"}
     present_days = sum(1 for d in docs if d.get("status") in present_statuses)
     total_hours = round(sum(float(d.get("hours_worked") or 0.0) for d in docs), 1)
-    pct = (present_days / MONTHLY_WORKING_DAYS) * 100
+    working_days = working_days_in_month(month_str)   # Mon–Sat minus 2nd Saturday
+    pct = (present_days / working_days) * 100 if working_days else 0.0
     pct = min(100.0, round(pct, 1))
 
     return {
@@ -439,7 +506,7 @@ def get_employee_monthly(employee_id: str, month_str: str):
         "employee_name": emp_name,
         "month": month_str,
         "present_days": present_days,
-        "total_days": MONTHLY_WORKING_DAYS,
+        "total_days": working_days,
         "total_hours": total_hours,
         "percentage": f"{pct}%"
     }
