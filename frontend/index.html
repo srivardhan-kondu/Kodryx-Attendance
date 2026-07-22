@@ -275,7 +275,9 @@ const todayStr = localDateStr();
 // this exact URL hash. Regular kiosk users (plain http://…:5000/) never see it.
 // HR bookmarks:  http://<host>:5000/#hr-console-7x2k   (change the token below)
 const EDIT_ROUTE = '#hr-console-7x2k';
-const editMode = (location.hash === EDIT_ROUTE);
+// Edit controls turn on via the secret hash (kiosk) OR automatically on the
+// password-protected HR dashboard (see enableAdminEditing() below).
+let editMode = (location.hash === EDIT_ROUTE);
 
 // ---- Dedicated kiosk mode ----
 // ONLY the scanning machine opens this URL:  http://<host>:5000/#kiosk
@@ -605,8 +607,20 @@ function saveCorrection(){
 }
 
 
+// Turn on the entry/exit Edit controls. Called at init (if secret hash) and
+// again if the backend reports this is the protected admin dashboard.
+function enableEditControls(){
+  const th=document.getElementById('th-action'); if(th) th.style.display='';
+  if(document.getElementById('daily').classList.contains('active')) loadDaily();
+}
+
 // init
-if(editMode){ const th=document.getElementById('th-action'); if(th) th.style.display=''; }
+if(editMode){ enableEditControls(); }
+// On the password-protected HR dashboard, edit controls appear automatically
+// after login — no secret URL needed. (Kiosk has no password -> stays hidden.)
+fetch(API+'/api/mode').then(r=>r.json()).then(m=>{
+  if(m && m.admin && !editMode){ editMode=true; enableEditControls(); }
+}).catch(()=>{});
 // Dedicated kiosk: auto-start continuous scanning (this URL only).
 if(kioskMode){ showTab('mark'); startCam(true); }
 loadDaily();

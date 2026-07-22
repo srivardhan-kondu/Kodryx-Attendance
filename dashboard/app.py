@@ -136,6 +136,15 @@ def api_backup_rebuild(date_str):
     return jsonify({"success": True, "work_date": date_str, "records": count})
 
 
+@app.route("/api/mode")
+def api_mode():
+    """Tell the UI whether it's running as a protected admin dashboard.
+    When a password is set (the cloud HR site), the edit controls appear
+    automatically after login — no secret URL needed. On the public kiosk
+    (no password) they stay hidden unless the secret hash is used."""
+    return jsonify({"admin": bool(AUTH_PASSWORD)})
+
+
 @app.route("/api/config")
 def api_config():
     """Expose the live attendance rules so the UI can explain them accurately."""
