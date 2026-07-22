@@ -12,8 +12,8 @@ from pymongo import MongoClient
 from tz_utils import strftime_today, strftime_now, now_ist
 from config import (
     MONTHLY_WORKING_DAYS, EMBEDDINGS_FILE,
-    WORKDAY_START_TIME, WORKDAY_END_TIME, TARGET_WORK_HOURS,
-    ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, MONGO_URI
+    ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, MONGO_URI,
+    ABSENT_CUTOFF_HOUR,
 )
 
 _client = None
@@ -158,10 +158,9 @@ def log_presence_event(employee_id, employee_name, confidence, camera_source, fr
     if hours < EXIT_MIN_GAP_HOURS:
         return
 
-    status = "Complete" if hours >= TARGET_WORK_HOURS else "Short"
     db.daily_summary.update_one(
         {"_id": doc["_id"]},
-        {"$set": {"last_seen": event_time, "hours_worked": hours, "status": status}},
+        {"$set": {"last_seen": event_time, "hours_worked": hours, "status": "Complete"}},
     )
     print(f"[DB] Exit (logout): {employee_name} | {event_time} | {hours:.2f}h")
     snapshot_daily_backup(work_date)
@@ -177,43 +176,123 @@ def get_last_event_type_today(employee_id):
     return doc["event_type"] if doc else None
 
 
-def get_today_summary():
-    today = strftime_today()
+def _parse_dt(s):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _summary_row(row):
+    """Format one daily_summary doc for the dashboard, including the
+    employee_id + raw 24h times needed by the HR correction editor."""
+    fdt = _parse_dt(row.get("first_seen"))
+    ldt = _parse_dt(row.get("last_seen"))
+    return {
+        "employee_id": row.get("employee_id"),
+        "name":        row.get("employee_name"),
+        "work_date":   row.get("work_date"),
+        "entry":       fdt.strftime("%I:%M %p") if fdt else "—",
+        "exit":        ldt.strftime("%I:%M %p") if ldt else "—",
+        "entry_raw":   fdt.strftime("%H:%M") if fdt else "",
+        "exit_raw":    ldt.strftime("%H:%M") if ldt else "",
+        "hours":       round(float(row.get("hours_worked") or 0.0), 2),
+        "status":      row.get("status", "Absent"),
+    }
+
+
+def _summaries_for(target_date):
     db = get_db()
-    
-    docs = list(db.daily_summary.find({"work_date": today}))
-    
-    def sort_key(row):
-        return row.get("first_seen") or "9999-99-99 99:99:99"
-    
-    docs = sorted(docs, key=sort_key)
+    docs = list(db.daily_summary.find({"work_date": target_date}))
+    docs.sort(key=lambda r: r.get("first_seen") or "9999-99-99 99:99:99")
+    today = strftime_today()
 
-    result = []
-    for row in docs:
-        first_time = row.get("first_seen")
-        last_time  = row.get("last_seen")
-        if first_time:
-            first_time = datetime.strptime(first_time, "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
-        if last_time:
-            last_time = datetime.strptime(last_time, "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
+    rows = []
+    for d in docs:
+        row = _summary_row(d)
+        # Forgot to log off on a PAST day -> just FLAG it "Auto logout" for HR.
+        # Do NOT estimate an exit or count hours; HR edits the real timing.
+        if (target_date < today and d.get("first_seen") and not d.get("last_seen")
+                and row["status"] == "In office"):
+            row["status"] = "Auto logout"
+            row["auto"] = True
+        rows.append(row)
 
-        result.append({
-            "name":         row.get("employee_name"),
-            "entry":        first_time or "—",
-            "exit":         last_time or "—",
-            "status":       row.get("status", "Absent")
-        })
+    # Absence rule: enrolled employees with no record are marked Absent once the
+    # cutoff has passed — always for past days, and after ABSENT_CUTOFF_HOUR today.
+    # (Before the cutoff today they simply don't appear yet — they may still arrive.)
+    now = now_ist()
+    past_cutoff = (target_date < today) or (
+        target_date == today and (now.hour + now.minute / 60.0) >= ABSENT_CUTOFF_HOUR
+    )
+    if past_cutoff and target_date <= today:
+        present_ids = {r.get("employee_id") for r in docs}
+        absentees = [
+            {"employee_id": eid, "name": name, "work_date": target_date,
+             "entry": "—", "exit": "—", "entry_raw": "", "exit_raw": "",
+             "hours": 0.0, "status": "Absent"}
+            for eid, name in get_registered_employees().items()
+            if eid not in present_ids
+        ]
+        absentees.sort(key=lambda r: (r["name"] or "").lower())
+        rows.extend(absentees)
+    return rows
 
-    return result
+
+def get_today_summary():
+    return _summaries_for(strftime_today())
+
 
 def get_date_summary(target_date: str):
+    return _summaries_for(target_date)
+
+
+def correct_attendance(employee_id, work_date, entry_time=None, exit_time=None):
+    """
+    HR manual correction of a person's entry/exit for a given date.
+    `entry_time` / `exit_time` are 'HH:MM' (24h) strings:
+      • a time string  -> set that time (combined with work_date)
+      • empty string '' -> clear it (exit '' => back to 'In office')
+      • None            -> leave unchanged
+    Recomputes hours_worked + status and refreshes the daily backup.
+    Returns the updated summary row, or None if no record exists.
+    """
     db = get_db()
-    docs = list(db.daily_summary.find({"work_date": target_date}, {"_id": 0}))
-    
-    def sort_key(row):
-        return row.get("first_seen") or "9999-99-99 99:99:99"
-        
-    return sorted(docs, key=sort_key)
+    doc = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
+    if not doc:
+        return None
+
+    def _mk(t):
+        t = (t or "").strip()
+        if not t:
+            return None
+        if len(t) == 5:            # 'HH:MM' -> add seconds
+            t = t + ":00"
+        return f"{work_date} {t}"
+
+    update = {}
+    if entry_time is not None and entry_time.strip() != "":
+        update["first_seen"] = _mk(entry_time)
+    if exit_time is not None:
+        update["last_seen"] = _mk(exit_time)   # '' -> None (cleared)
+
+    first_seen = update.get("first_seen", doc.get("first_seen"))
+    last_seen  = update.get("last_seen", doc.get("last_seen"))
+
+    if last_seen:
+        hours = _hours_between(first_seen, last_seen)
+        update["status"] = "Complete"
+        update["hours_worked"] = round(hours, 2)
+    else:
+        update["status"] = "In office"
+        update["hours_worked"] = 0.0
+
+    db.daily_summary.update_one({"_id": doc["_id"]}, {"$set": update})
+    snapshot_daily_backup(work_date)
+    updated = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
+    return _summary_row(updated)
 
 
 def export_to_excel(start_date: str, end_date: str, filepath: str):
@@ -269,38 +348,169 @@ def get_monthly_report(month_str: str):
     report = []
     db = get_db()
     
+    present_statuses = {'Complete', 'In office', 'Late Entry',
+                        'Early Exit', 'Late & Early', 'Present'}
+
     for emp_id, emp_name in employees.items():
-        present_days = db.daily_summary.count_documents({
-            "employee_id": emp_id,
-            "work_date": {"$regex": f"^{month_str}-"},
-            "status": {"$in": ['Complete', 'Short', 'In office', 'Late Entry', 'Early Exit', 'Late & Early', 'Present']}
-        })
-        
+        docs = list(db.daily_summary.find(
+            {"employee_id": emp_id, "work_date": {"$regex": f"^{month_str}-"}},
+            {"_id": 0, "status": 1, "hours_worked": 1},
+        ))
+        present_days = sum(1 for d in docs if d.get("status") in present_statuses)
+        # Forgotten logouts have 0 stored hours and are NOT estimated — they
+        # stay uncounted until HR edits the real timing.
+        total_hours = round(sum(float(d.get("hours_worked") or 0.0) for d in docs), 1)
+
         pct = (present_days / MONTHLY_WORKING_DAYS) * 100
         pct = min(100.0, round(pct, 1))
-        
+
         report.append({
             "employee_id": emp_id,
             "name": emp_name,
             "present_days": present_days,
             "total_days": MONTHLY_WORKING_DAYS,
+            "total_hours": total_hours,
             "percentage": f"{pct}%"
         })
-        
+
     report.sort(key=lambda x: float(x["percentage"].replace("%", "")), reverse=True)
     return report
+
+
+def get_employee_daily(employee_id: str, month_str: str):
+    """Get employee's daily attendance records for a month (YYYY-MM)."""
+    db = get_db()
+    docs = list(db.daily_summary.find(
+        {"employee_id": employee_id, "work_date": {"$regex": f"^{month_str}-"}},
+        {"_id": 0}
+    ).sort("work_date", 1))
+    return [_summary_row(d) for d in docs]
+
+
+def get_employee_weekly(employee_id: str, month_str: str):
+    """Get employee's weekly attendance for a month. Groups daily records by week."""
+    from datetime import datetime
+    docs = get_employee_daily(employee_id, month_str)
+
+    weeks = {}
+    for row in docs:
+        dt = datetime.strptime(row["work_date"], "%Y-%m-%d")
+        # ISO week: Monday=0, Sunday=6; week starts Monday
+        week_start = dt - __import__("datetime").timedelta(days=dt.weekday())
+        week_key = week_start.strftime("%Y-W%U")  # "2026-W27"
+
+        if week_key not in weeks:
+            weeks[week_key] = {
+                "week": week_key,
+                "start_date": week_start.strftime("%Y-%m-%d"),
+                "days_present": 0,
+                "total_hours": 0.0,
+                "days": []
+            }
+
+        weeks[week_key]["days"].append(row)
+        if row["status"] not in ["Absent", "Leave", "Auto logout"]:
+            weeks[week_key]["days_present"] += 1
+        weeks[week_key]["total_hours"] += row["hours"]
+
+    return sorted(weeks.values(), key=lambda w: w["start_date"])
+
+
+def get_employee_monthly(employee_id: str, month_str: str):
+    """Get employee's monthly summary for a month."""
+    db = get_db()
+    docs = list(db.daily_summary.find(
+        {"employee_id": employee_id, "work_date": {"$regex": f"^{month_str}-"}},
+        {"_id": 0, "status": 1, "hours_worked": 1, "employee_name": 1}
+    ))
+
+    if not docs:
+        return None
+
+    emp_name = docs[0].get("employee_name", "")
+    present_statuses = {"Complete", "In office"}
+    present_days = sum(1 for d in docs if d.get("status") in present_statuses)
+    total_hours = round(sum(float(d.get("hours_worked") or 0.0) for d in docs), 1)
+    pct = (present_days / MONTHLY_WORKING_DAYS) * 100
+    pct = min(100.0, round(pct, 1))
+
+    return {
+        "employee_id": employee_id,
+        "employee_name": emp_name,
+        "month": month_str,
+        "present_days": present_days,
+        "total_days": MONTHLY_WORKING_DAYS,
+        "total_hours": total_hours,
+        "percentage": f"{pct}%"
+    }
+
+
+def _fmt_hm(dec):
+    """Decimal hours -> 'Xh Ym'."""
+    dec = float(dec or 0.0)
+    h = int(dec)
+    m = round((dec - h) * 60)
+    if m == 60:
+        h += 1
+        m = 0
+    return f"{h}h {m}m"
+
+
+def export_employee_to_excel(employee_id: str, month_str: str, filepath: str):
+    """Export one employee's Daily + Weekly + Monthly attendance to a 3-sheet Excel."""
+    import pandas as pd
+    daily = get_employee_daily(employee_id, month_str)
+    weekly = get_employee_weekly(employee_id, month_str)
+    monthly = get_employee_monthly(employee_id, month_str)
+
+    with pd.ExcelWriter(filepath) as writer:
+        # --- Daily sheet ---
+        if daily:
+            df_d = pd.DataFrame([{
+                "Date": r["work_date"], "Entry": r["entry"], "Exit": r["exit"],
+                "Hours": _fmt_hm(r["hours"]), "Status": r["status"],
+            } for r in daily])
+        else:
+            df_d = pd.DataFrame(columns=["Date", "Entry", "Exit", "Hours", "Status"])
+        df_d.to_excel(writer, sheet_name="Daily", index=False)
+
+        # --- Weekly sheet ---
+        if weekly:
+            df_w = pd.DataFrame([{
+                "Week": w["week"], "Start Date": w["start_date"],
+                "Days Present": w["days_present"], "Total Hours": _fmt_hm(w["total_hours"]),
+            } for w in weekly])
+        else:
+            df_w = pd.DataFrame(columns=["Week", "Start Date", "Days Present", "Total Hours"])
+        df_w.to_excel(writer, sheet_name="Weekly", index=False)
+
+        # --- Monthly sheet ---
+        if monthly:
+            df_m = pd.DataFrame([{
+                "Employee": monthly["employee_name"], "Month": monthly["month"],
+                "Present Days": monthly["present_days"], "Working Days": monthly["total_days"],
+                "Total Hours": _fmt_hm(monthly["total_hours"]), "Attendance %": monthly["percentage"],
+            }])
+        else:
+            df_m = pd.DataFrame(columns=["Employee", "Month", "Present Days",
+                                         "Working Days", "Total Hours", "Attendance %"])
+        df_m.to_excel(writer, sheet_name="Monthly", index=False)
+
+    return filepath
 
 
 def export_monthly_to_excel(month_str: str, filepath: str):
     report_data = get_monthly_report(month_str)
     
+    cols = ["Employee ID", "Employee Name", "Present Days",
+            "Monthly Working Days", "Total Hours", "Attendance %"]
     if not report_data:
         # If database is completely empty, create an empty sheet with columns
-        df = pd.DataFrame(columns=["Employee ID", "Employee Name", "Present Days", "Monthly Working Days", "Attendance %"])
+        df = pd.DataFrame(columns=cols)
     else:
         df = pd.DataFrame(report_data)
-        df.columns = ["Employee ID", "Employee Name", "Present Days", "Monthly Working Days", "Attendance %"]
-        
+        df.columns = cols
+
     df.to_excel(filepath, index=False)
     return filepath
 

@@ -1,16 +1,21 @@
-# Render backend (API + face recognition).
-# NOTE: InsightFace + the face model need RAM — the free 512MB tier will
-# likely OOM. Use a paid instance with >= 2GB.
+# Render deployment — HR Admin Dashboard (view / edit / download, no camera).
+# Lightweight: skips InsightFace/face-recognition, so it runs fine on the
+# free/starter tier. Adding NEW employees still happens at the office kiosk.
+# Live data: this connects to the same MongoDB Atlas cluster as the kiosk.
 services:
   - type: web
-    name: attendance-backend
+    name: kodryx-hr-dashboard
     runtime: python
-    plan: standard            # free/starter may OOM on the AI model
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn dashboard.app:app --workers 1 --timeout 180 --bind 0.0.0.0:$PORT
+    plan: starter              # cheap; no AI model loaded here
+    buildCommand: pip install -r requirements_cloud.txt
+    startCommand: gunicorn dashboard.app:app --workers 1 --timeout 60 --bind 0.0.0.0:$PORT
     healthCheckPath: /api/health
     envVars:
-      - key: MONGO_URI        # set this in the Render dashboard (your Atlas URI)
+      - key: MONGO_URI          # set in the Render dashboard (your Atlas URI)
+        sync: false
+      - key: ADMIN_USER         # HR's login username
+        sync: false
+      - key: ADMIN_PASSWORD     # HR's login password (choose something strong)
         sync: false
       - key: PYTHON_VERSION
         value: "3.11.9"

@@ -11,8 +11,10 @@
 
 import base64
 import logging
+import os
+import shutil
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import cv2
 import numpy as np
@@ -20,7 +22,7 @@ import numpy as np
 from tz_utils import now_ist
 from config import (
     MIN_FACE_SIZE, FACE_MIN_DET_SCORE, COOLDOWN_MINUTES,
-    ENABLE_ANTI_SPOOFING,
+    ENABLE_ANTI_SPOOFING, CAPTURE_DIR, CAPTURE_RETENTION_DAYS,
 )
 from face_engine import FaceEngine, load_employee_database
 from attendance_db import log_presence_event
@@ -118,6 +120,53 @@ def _cooldown_ok(employee_id):
     return last is None or (now_ist() - last) >= timedelta(minutes=COOLDOWN_MINUTES)
 
 
+# --------------------------------------------------------------------
+#  Local capture storage — save a scan snapshot to disk (NOT MongoDB)
+#  as an attendance evidence trail; auto-purged after N days.
+# --------------------------------------------------------------------
+_last_cleanup_day = None
+
+
+def cleanup_old_captures():
+    """Delete capture day-folders older than CAPTURE_RETENTION_DAYS."""
+    try:
+        if not os.path.isdir(CAPTURE_DIR):
+            return
+        cutoff = (now_ist() - timedelta(days=CAPTURE_RETENTION_DAYS)).date()
+        for name in os.listdir(CAPTURE_DIR):
+            folder = os.path.join(CAPTURE_DIR, name)
+            if not os.path.isdir(folder):
+                continue
+            try:
+                folder_date = datetime.strptime(name, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if folder_date < cutoff:
+                shutil.rmtree(folder, ignore_errors=True)
+                log.info("[SCAN] Purged captures older than %d days: %s",
+                         CAPTURE_RETENTION_DAYS, name)
+    except Exception as exc:                               # pragma: no cover
+        log.debug("[SCAN] capture cleanup failed: %s", exc)
+
+
+def _save_capture(frame, employee_id):
+    """Save one scan frame under captures/<date>/<emp>_<HHMMSS>.jpg."""
+    global _last_cleanup_day
+    try:
+        now = now_ist()
+        day = now.strftime("%Y-%m-%d")
+        folder = os.path.join(CAPTURE_DIR, day)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{employee_id}_{now.strftime('%H%M%S')}.jpg")
+        cv2.imwrite(path, frame)
+        # Run the 30-day purge at most once per day (first capture of the day).
+        if _last_cleanup_day != day:
+            _last_cleanup_day = day
+            cleanup_old_captures()
+    except Exception as exc:                                # pragma: no cover
+        log.debug("[SCAN] capture save failed: %s", exc)
+
+
 def scan_frame(image_b64):
     """
     Run one browser frame through the pipeline.
@@ -165,6 +214,7 @@ def scan_frame(image_b64):
         log_presence_event(emp_id, name, conf, "kiosk_web")
         _last_seen[emp_id] = now_ist()
         marked = True
+        _save_capture(frame, emp_id)   # store snapshot locally (evidence trail)
 
     return {"status": "present", "name": name,
             "confidence": round(float(conf), 3),

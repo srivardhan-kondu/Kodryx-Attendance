@@ -157,7 +157,6 @@ IDLE_IOU_THRESH   = 0.85
 # Flexible Workday Timings
 WORKDAY_START_TIME = "09:00:00"
 WORKDAY_END_TIME   = "21:00:00"
-TARGET_WORK_HOURS  = 7.0
 
 # TIME-BASED entry/exit:
 #   A scan BEFORE this hour  = morning  -> sets ENTRY (login).
@@ -198,6 +197,21 @@ DATABASE_PATH      = os.path.join(BASE_DIR, "data", "attendance.db")
 LOG_FILE           = os.path.join(BASE_DIR, "logs", "system.log")
 EMBEDDINGS_FILE    = os.path.join(BASE_DIR, "enrollment", "embeddings.pkl")
 REID_GALLERY_FILE  = os.path.join(BASE_DIR, "enrollment", "reid_gallery.pkl")
+
+# ---------------------------------------------------------------
+# LOCAL CAPTURE STORAGE
+# Scan snapshots are saved to the local filesystem (NOT MongoDB) as an
+# attendance evidence trail, and auto-purged after CAPTURE_RETENTION_DAYS.
+# ---------------------------------------------------------------
+CAPTURE_DIR            = os.path.join(BASE_DIR, "captures")
+CAPTURE_RETENTION_DAYS = int(os.environ.get("CAPTURE_RETENTION_DAYS", "30"))
+
+# ---------------------------------------------------------------
+# ABSENCE RULE
+# An enrolled employee who has not logged in by this hour (IST) is
+# marked Absent for the day. Past days always count missing = Absent.
+# ---------------------------------------------------------------
+ABSENT_CUTOFF_HOUR = float(os.environ.get("ABSENT_CUTOFF_HOUR", "19.0"))  # 7:00 PM
 
 # ---------------------------------------------------------------
 # EMPLOYEE ENROLLMENT DATABASE  (SQLite — Phase 3 upgrade)

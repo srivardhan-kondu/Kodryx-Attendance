@@ -15,5 +15,11 @@ data/buffalo_l/
 logs/
 *.log
 
+# Local scan capture snapshots (auto-purged after 30 days)
+captures/
+
+# One-off data backups made during manual DB fixes (contain real employee data)
+attendance_backup_preshift.json
+
 # AI Models
 venv/

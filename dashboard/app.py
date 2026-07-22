@@ -10,17 +10,18 @@
 
 import os
 import sys
+import hmac
 import tempfile
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, jsonify, send_file, request, send_from_directory
+from flask import Flask, jsonify, send_file, request, send_from_directory, Response
 
 from attendance_db import (
     get_today_summary, get_date_summary, export_to_excel,
     get_monthly_report, export_monthly_to_excel,
-    snapshot_daily_backup, get_daily_backup,
+    snapshot_daily_backup, get_daily_backup, correct_attendance,
 )
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
@@ -40,9 +41,44 @@ def _preflight():
 @app.after_request
 def _cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     return resp
+
+
+# ---------------------------------------------------------------
+# Authentication (HTTP Basic) — protects the page AND every /api
+# endpoint before the app is exposed to the internet (e.g. via a
+# Tailscale Funnel / Cloudflare tunnel).
+#
+# Enabled only when ADMIN_PASSWORD is set, so local development on
+# localhost stays friction-free. SET IT before exposing publicly:
+#     ADMIN_USER=admin  ADMIN_PASSWORD=your-secret  python serve.py
+# ---------------------------------------------------------------
+AUTH_USER = os.environ.get("ADMIN_USER", "admin")
+AUTH_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+_PUBLIC_PATHS = {"/api/health"}
+
+if not AUTH_PASSWORD:
+    print("[AUTH] ⚠  ADMIN_PASSWORD not set — the dashboard is UNPROTECTED. "
+          "Set ADMIN_PASSWORD before exposing it to the internet.")
+
+
+@app.before_request
+def _require_auth():
+    if not AUTH_PASSWORD:                     # auth disabled (local dev)
+        return
+    if request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
+        return
+    auth = request.authorization
+    ok = (auth is not None
+          and auth.username == AUTH_USER
+          and hmac.compare_digest(auth.password or "", AUTH_PASSWORD))
+    if not ok:
+        return Response(
+            "Authentication required.", 401,
+            {"WWW-Authenticate": 'Basic realm="Kodryx Attendance"'},
+        )
 
 
 # ---------------------------------------------------------------
@@ -64,6 +100,24 @@ def static_files(filename):
 @app.route("/api/health")
 def api_health():
     return jsonify({"ok": True})
+
+
+@app.route("/api/correct", methods=["POST"])
+def api_correct():
+    """HR manual correction of a person's entry/exit for a date."""
+    data = request.get_json(silent=True) or {}
+    emp_id = data.get("employee_id")
+    work_date = data.get("work_date")
+    if not emp_id or not work_date:
+        return jsonify({"success": False, "error": "employee_id and work_date are required."}), 400
+    rec = correct_attendance(
+        emp_id, work_date,
+        entry_time=data.get("entry_time"),
+        exit_time=data.get("exit_time"),
+    )
+    if rec is None:
+        return jsonify({"success": False, "error": "No attendance record for that person/date."}), 404
+    return jsonify({"success": True, "record": rec})
 
 
 @app.route("/api/backup/<date_str>")
@@ -112,21 +166,9 @@ def api_date(date_str):
         datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
         return jsonify({"error": "Invalid date format"}), 400
-    result = []
-    for row in get_date_summary(date_str):
-        entry = row.get("first_seen")
-        exit_ = row.get("last_seen")
-        if entry:
-            entry = datetime.strptime(entry, "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
-        if exit_:
-            exit_ = datetime.strptime(exit_, "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
-        result.append({
-            "name": row.get("employee_name"),
-            "entry": entry or "—",
-            "exit": exit_ or "—",
-            "status": row.get("status") or "Absent",
-        })
-    return jsonify(result)
+    # get_date_summary already returns fully-formatted rows
+    # (name / entry / exit / hours / status), same shape as /api/today.
+    return jsonify(get_date_summary(date_str))
 
 
 @app.route("/api/monthly_report")
@@ -135,6 +177,41 @@ def api_monthly_report():
     if not month:
         return jsonify({"error": "Missing month"}), 400
     return jsonify(get_monthly_report(month))
+
+
+@app.route("/api/employee/<emp_id>/daily/<month>")
+def api_employee_daily(emp_id, month):
+    """Get employee's daily attendance for a month."""
+    from attendance_db import get_employee_daily
+    return jsonify(get_employee_daily(emp_id, month))
+
+
+@app.route("/api/employee/<emp_id>/weekly/<month>")
+def api_employee_weekly(emp_id, month):
+    """Get employee's weekly attendance for a month."""
+    from attendance_db import get_employee_weekly
+    return jsonify(get_employee_weekly(emp_id, month))
+
+
+@app.route("/api/employee/<emp_id>/monthly/<month>")
+def api_employee_monthly(emp_id, month):
+    """Get employee's monthly summary for a month."""
+    from attendance_db import get_employee_monthly
+    result = get_employee_monthly(emp_id, month)
+    if not result:
+        return jsonify({"error": "No records found"}), 404
+    return jsonify(result)
+
+
+@app.route("/api/employee/<emp_id>/export/<month>")
+def api_employee_export(emp_id, month):
+    """Download one employee's Daily+Weekly+Monthly attendance as Excel."""
+    from attendance_db import export_employee_to_excel
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    tmp.close()
+    export_employee_to_excel(emp_id, month, tmp.name)
+    return send_file(tmp.name, as_attachment=True,
+                     download_name=f"{emp_id}_{month}_attendance.xlsx")
 
 
 @app.route("/api/export")
@@ -190,6 +267,39 @@ def api_remove_employee(emp_id):
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@app.route("/api/rename_employee/<emp_id>", methods=["POST"])
+def api_rename_employee(emp_id):
+    """Rename an employee — no face re-processing needed, safe on the
+    lightweight cloud deployment (no InsightFace required)."""
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("employee_name") or "").strip()
+    if not new_name:
+        return jsonify({"success": False, "error": "Name is required."}), 400
+    try:
+        from employee_db import EmployeeDB
+        db = EmployeeDB()
+        if not db.employee_exists(emp_id):
+            return jsonify({"success": False, "error": "Employee not found."}), 404
+        db.collection.update_one({"employee_id": emp_id}, {"$set": {"employee_name": new_name}})
+        # Keep past + future attendance rows showing the new name too.
+        from attendance_db import get_db as _get_attendance_db
+        adb = _get_attendance_db()
+        adb.daily_summary.update_many({"employee_id": emp_id}, {"$set": {"employee_name": new_name}})
+        adb.daily_backup.update_many(
+            {"records.employee_id": emp_id},
+            {"$set": {"records.$[r].employee_name": new_name}},
+            array_filters=[{"r.employee_id": emp_id}],
+        )
+        try:
+            from scan_service import reload_employees
+            reload_employees()
+        except Exception:
+            pass
+        return jsonify({"success": True, "employee_id": emp_id, "employee_name": new_name})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/api/enroll_employee", methods=["POST"])
 def api_enroll_employee():
     data = request.get_json(silent=True) or {}
@@ -199,6 +309,14 @@ def api_enroll_employee():
         return jsonify({"success": False, "error": "Missing name or images"}), 400
     try:
         from scan_service import enroll_employee
+    except ImportError:
+        return jsonify({
+            "success": False,
+            "error": "Adding new employees requires face-recognition processing, "
+                     "which isn't available on this deployment. Please add new "
+                     "employees from the office kiosk instead.",
+        }), 501
+    try:
         result = enroll_employee(name, images)
         return jsonify(result), (200 if result.get("success") else 400)
     except Exception as exc:

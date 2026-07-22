@@ -49,6 +49,7 @@ td.mono{font-family:var(--mono);color:var(--soft);font-size:13px}
 .badge{display:inline-block;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px}
 .badge-green{background:var(--green-bg);color:var(--green)} .badge-blue{background:var(--blue-bg);color:var(--blue)}
 .badge-yellow{background:var(--yellow-bg);color:var(--yellow)} .badge-gray{background:var(--inset);color:var(--muted)}
+.badge-red{background:var(--red-bg);color:var(--red)}
 input,select{border:1px solid var(--border2);border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--sans);background:var(--surface)}
 button,.btn{padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;border:1px solid var(--border2);
   background:var(--surface);color:var(--text);cursor:pointer;font-family:var(--sans)}
@@ -71,34 +72,37 @@ button:hover{background:var(--inset)}
 
 <div class="container">
   <div class="tabs">
-    <div class="tab active" id="nav-daily" onclick="showTab('daily')">Daily Dashboard</div>
-    <div class="tab" id="nav-mark" onclick="showTab('mark')">Mark Attendance</div>
+    <div class="tab active" id="nav-mark" onclick="showTab('mark')">Mark Attendance</div>
+    <div class="tab" id="nav-daily" onclick="showTab('daily')">Daily Dashboard</div>
     <div class="tab" id="nav-monthly" onclick="showTab('monthly')">Monthly Reports</div>
+    <div class="tab" id="nav-emp-detail" onclick="showTab('emp-detail')" style="display:none">Employee Details</div>
     <div class="tab" id="nav-employees" onclick="showTab('employees')">Employees</div>
   </div>
 
   <!-- DAILY -->
-  <div id="daily" class="page active">
+  <div id="daily" class="page">
     <div class="stat-row">
       <div class="stat-card"><div class="stat-label">Present Today</div><div class="stat-value" id="s-present">—</div></div>
       <div class="stat-card"><div class="stat-label">In Office Now</div><div class="stat-value" id="s-inoffice" style="color:var(--accent)">—</div></div>
       <div class="stat-card"><div class="stat-label">Completed Hours</div><div class="stat-value" id="s-complete" style="color:var(--green)">—</div></div>
-      <div class="stat-card"><div class="stat-label">Short Hours</div><div class="stat-value" id="s-short" style="color:var(--red)">—</div></div>
     </div>
     <div class="card">
       <div class="card-head">
-        <div class="card-title">Today's Attendance — <span id="today-date" style="color:var(--muted);font-weight:400"></span></div>
-        <button onclick="loadDaily()">Refresh</button>
+        <div class="card-title"><span id="daily-title">Today's Attendance</span> — <span id="today-date" style="color:var(--muted);font-weight:400"></span></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" onclick="goToday()">Today</button>
+          <button onclick="loadDaily()">Refresh</button>
+        </div>
       </div>
-      <table><thead><tr><th>Employee</th><th>Entry</th><th>Exit</th><th>Status</th></tr></thead>
-        <tbody id="daily-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table>
+      <table><thead><tr><th>Employee</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th><th id="th-action" style="display:none">Action</th></tr></thead>
+        <tbody id="daily-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table>
       <p style="font-size:12px;color:var(--muted);padding:10px 14px">Auto-refreshes every 30 seconds.</p>
     </div>
     <div class="card">
       <div class="card-head"><div class="card-title">History &amp; Export</div></div>
       <div class="pad controls">
         <label style="color:var(--muted)">View date</label>
-        <input type="date" id="hist-date"><button onclick="viewDate()">View</button>
+        <input type="date" id="hist-date" onchange="viewDate()"><button onclick="viewDate()">View</button>
         <span style="width:16px"></span>
         <label style="color:var(--muted)">Export</label>
         <input type="date" id="exp-start"><span style="color:var(--muted)">to</span><input type="date" id="exp-end">
@@ -108,36 +112,15 @@ button:hover{background:var(--inset)}
   </div>
 
   <!-- MARK ATTENDANCE -->
-  <div id="mark" class="page">
-    <div class="card"><div class="pad">
-      <div style="color:var(--muted);margin-bottom:14px">
-        Click <b>Start Camera</b> and look at the camera. Photos/screens are rejected by the liveness check.
-      </div>
-      <div class="card-title" style="margin-bottom:10px">How attendance is marked</div>
-      <div id="rules-grid" style="display:flex;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px;background:var(--green-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
-          <div style="font-weight:600;color:var(--green)">🟢 Entry (login)</div>
-          <div style="color:var(--soft);margin-top:4px" id="rule-entry">First scan of the day.</div>
-        </div>
-        <div style="flex:1;min-width:200px;background:var(--blue-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
-          <div style="font-weight:600;color:var(--blue)">🔵 Exit (logout)</div>
-          <div style="color:var(--soft);margin-top:4px" id="rule-exit">A later scan in the day.</div>
-        </div>
-        <div style="flex:1;min-width:200px;background:var(--inset);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
-          <div style="font-weight:600;color:var(--muted)">⏱ Anti-spam</div>
-          <div style="color:var(--soft);margin-top:4px" id="rule-cooldown">Repeat scans are ignored briefly.</div>
-        </div>
-      </div>
-      <div style="color:var(--muted);font-size:12px;margin-top:10px" id="rule-note"></div>
-    </div></div>
+  <div id="mark" class="page active">
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="btn-primary" id="cam-start" onclick="startCam()" style="padding:12px 20px;font-size:15px">▶ Start Camera</button>
+      <button id="cam-stop" onclick="stopCam()" style="display:none;padding:12px 20px;font-size:15px">⏹ Stop Camera</button>
+    </div>
     <div style="display:flex;gap:24px;flex-wrap:wrap">
       <div style="flex:1;min-width:320px">
         <div style="background:#1c1b18;border-radius:10px;overflow:hidden;aspect-ratio:4/3">
           <video id="cam" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover"></video>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button class="btn-primary" id="cam-start" onclick="startCam()" style="padding:12px 20px;font-size:15px">▶ Start Camera</button>
-          <button id="cam-stop" onclick="stopCam()" style="display:none;padding:12px 20px;font-size:15px">⏹ Stop Camera</button>
         </div>
       </div>
       <div style="flex:1;min-width:320px">
@@ -153,6 +136,27 @@ button:hover{background:var(--inset)}
       </div>
     </div>
     <canvas id="cam-canvas" style="display:none"></canvas>
+    <!-- Idle screen-saver: solid black over everything when no motion; camera keeps watching -->
+    <div id="idle-veil" onclick="wakeScreen()" style="display:none;position:fixed;inset:0;
+      background:#000;z-index:9999;cursor:pointer;"></div>
+  </div>
+
+  <!-- Correction editor (HR fixes a wrong/accidental entry or exit) -->
+  <div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+    z-index:10000;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px;width:340px">
+      <div class="card-title" id="edit-title" style="margin-bottom:16px">Edit attendance</div>
+      <label style="color:var(--muted);font-size:13px">Entry time</label>
+      <input type="time" id="edit-entry" style="width:100%;margin:5px 0 14px">
+      <label style="color:var(--muted);font-size:13px">Exit time
+        <span style="color:var(--muted)">— leave blank = still in office</span></label>
+      <input type="time" id="edit-exit" style="width:100%;margin:5px 0 18px">
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="closeEdit()">Cancel</button>
+        <button class="btn-primary" onclick="saveCorrection()">Save</button>
+      </div>
+      <div id="edit-status" style="color:var(--red);font-size:12px;margin-top:10px"></div>
+    </div>
   </div>
 
   <!-- MONTHLY -->
@@ -166,8 +170,8 @@ button:hover{background:var(--inset)}
           <button onclick="exportMonthly()">Export Excel</button>
         </div>
       </div>
-      <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Attendance %</th></tr></thead>
-        <tbody id="monthly-body"><tr><td colspan="4" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
+      <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Total Hours</th><th>Attendance %</th></tr></thead>
+        <tbody id="monthly-body"><tr><td colspan="5" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
     </div>
   </div>
 
@@ -202,12 +206,84 @@ button:hover{background:var(--inset)}
         <tbody id="emp-body"><tr><td colspan="3" class="empty">Loading…</td></tr></tbody></table>
     </div>
   </div>
+
+  <!-- EMPLOYEE DETAILS -->
+  <div id="emp-detail" class="page">
+    <div class="card">
+      <div class="card-head">
+        <div style="display:flex;gap:12px;align-items:center">
+          <button onclick="goBackEmployee()" style="padding:8px 12px">← Back</button>
+          <div class="card-title" id="emp-detail-name">Employee Details</div>
+        </div>
+      </div>
+      <div class="pad controls">
+        <label style="color:var(--muted)">Month</label>
+        <input type="month" id="emp-detail-month">
+        <button onclick="loadEmployeeDetail()">Load</button>
+        <span style="width:16px"></span>
+        <button class="btn-primary" onclick="downloadEmployee()">⬇ Download Excel</button>
+      </div>
+    </div>
+
+    <!-- Tabs: Daily / Weekly / Monthly -->
+    <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border)">
+      <div class="tab" id="emp-tab-daily" onclick="showEmployeeTab('daily')" style="padding:12px 16px;cursor:pointer;border-bottom:3px solid transparent;font-weight:500">Daily</div>
+      <div class="tab" id="emp-tab-weekly" onclick="showEmployeeTab('weekly')" style="padding:12px 16px;cursor:pointer;border-bottom:3px solid transparent;font-weight:500">Weekly</div>
+      <div class="tab" id="emp-tab-monthly" onclick="showEmployeeTab('monthly')" style="padding:12px 16px;cursor:pointer;border-bottom:3px solid transparent;font-weight:500">Monthly</div>
+    </div>
+
+    <!-- Daily Tab -->
+    <div id="emp-daily-view" class="card" style="display:none">
+      <div class="pad">
+        <table><thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th></tr></thead>
+          <tbody id="emp-daily-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- Weekly Tab -->
+    <div id="emp-weekly-view" class="card" style="display:none">
+      <div class="pad">
+        <table><thead><tr><th>Week</th><th>Start Date</th><th>Days Present</th><th>Total Hours</th></tr></thead>
+          <tbody id="emp-weekly-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- Monthly Tab -->
+    <div id="emp-monthly-view" class="card" style="display:none">
+      <div class="pad" id="emp-monthly-summary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
+        <div><div style="color:var(--muted);font-size:12px">Present Days</div><div id="emp-monthly-present" style="font-size:24px;font-weight:600">—</div></div>
+        <div><div style="color:var(--muted);font-size:12px">Total Days</div><div id="emp-monthly-total" style="font-size:24px;font-weight:600">—</div></div>
+        <div><div style="color:var(--muted);font-size:12px">Total Hours</div><div id="emp-monthly-hours" style="font-size:24px;font-weight:600">—</div></div>
+        <div><div style="color:var(--muted);font-size:12px">Attendance %</div><div id="emp-monthly-pct" style="font-size:24px;font-weight:600">—</div></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="config.js"></script>
 <script>
 const API = (window.API_BASE || "").replace(/\/$/, "");
-const todayStr = new Date().toISOString().slice(0,10);
+// LOCAL date (not UTC) so it matches the calendar/clock the user sees.
+function localDateStr(dt){const d=dt||new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function niceDate(iso){const [y,mo,da]=iso.split('-').map(Number);
+  return new Date(y,mo-1,da).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
+const todayStr = localDateStr();
+
+// ---- Secret HR-edit route ----
+// The entry/exit Edit controls only appear when the dashboard is opened with
+// this exact URL hash. Regular kiosk users (plain http://…:5000/) never see it.
+// HR bookmarks:  http://<host>:5000/#hr-console-7x2k   (change the token below)
+const EDIT_ROUTE = '#hr-console-7x2k';
+const editMode = (location.hash === EDIT_ROUTE);
+
+// ---- Dedicated kiosk mode ----
+// ONLY the scanning machine opens this URL:  http://<host>:5000/#kiosk
+// It auto-starts the camera and scans continuously. Every other machine
+// (plain URL) keeps the camera OFF until Start Camera is clicked — so an
+// admin/HR PC can never mark people by accident.
+const KIOSK_ROUTE = '#kiosk';
+const kioskMode = (location.hash === KIOSK_ROUTE);
 
 function clock(){const n=new Date();document.getElementById('clock').textContent=
   n.toTimeString().slice(0,8);}
@@ -216,7 +292,7 @@ document.getElementById('today-date').textContent =
   new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
 function showTab(id){
-  if(id!=='mark') stopCam();
+  if(id!=='mark') stopCam();   // leaving the scan tab always stops the camera
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -227,25 +303,41 @@ function showTab(id){
   if(id==='employees') loadEmployees();
 }
 
-function statusBadge(s){const m={'Complete':'badge-green','In office':'badge-blue','Short':'badge-yellow','Absent':'badge-gray'};
-  return `<span class="badge ${m[s]||'badge-gray'}">${s}</span>`;}
+function statusBadge(s){const m={'Complete':'badge-green','In office':'badge-blue','Absent':'badge-gray','Leave':'badge-gray','Auto logout':'badge-red'};
+  const label = (s==='Auto logout') ? 'Auto logout ⚠' : s;
+  return `<span class="badge ${m[s]||'badge-gray'}" title="${s==='Auto logout'?'Employee forgot to log off — hours not counted. HR should edit the real timing.':''}">${label}</span>`;}
+// Decimal hours (e.g. 7.72) -> "7h 43m" so nobody misreads the .72 as minutes.
+function fmtHM(dec){
+  dec = Number(dec)||0;
+  let h = Math.floor(dec), m = Math.round((dec-h)*60);
+  if(m===60){h+=1;m=0;}
+  return `${h}h ${m}m`;
+}
 
 // ---- Daily ----
+let curDate=todayStr;
 function loadDaily(){
-  const d=document.getElementById('hist-date').value||todayStr;
-  const ep = d===todayStr ? '/api/today' : '/api/date/'+d;
+  const today=localDateStr();           // compute fresh each time (survives midnight rollover)
+  const d=document.getElementById('hist-date').value||today;
+  curDate=d;
+  const ep = d===today ? '/api/today' : '/api/date/'+d;
+  // Reflect the date actually being viewed in the header.
+  document.getElementById('daily-title').textContent = (d===today) ? "Today's Attendance" : "Attendance";
+  document.getElementById('today-date').textContent = niceDate(d);
   const tb=document.getElementById('daily-body');
+  const cols = editMode?6:5;
   fetch(API+ep).then(r=>r.json()).then(data=>{
-    document.getElementById('s-present').textContent  = data.filter(r=>r.status!=='Absent').length;
+    document.getElementById('s-present').textContent  = data.filter(r=>r.status!=='Absent'&&r.status!=='Leave').length;
     document.getElementById('s-inoffice').textContent = data.filter(r=>r.status==='In office').length;
     document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
-    document.getElementById('s-short').textContent    = data.filter(r=>r.status==='Short').length;
-    if(!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No records for ${d}.</td></tr>`;return;}
-    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">${r.name}</td>
-      <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td>${statusBadge(r.status)}</td></tr>`).join('');
-  }).catch(()=>{tb.innerHTML=`<tr><td colspan="4" class="empty">Error loading data.</td></tr>`;});
+    if(!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records for ${d}.</td></tr>`;return;}
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)})">${r.name}</td>
+      <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td><td>${statusBadge(r.status)}</td>
+      ${editMode?`<td><button onclick="editRow('${r.employee_id}',${JSON.stringify(r.name)},'${r.entry_raw||''}','${r.exit_raw||''}')">Edit</button></td>`:''}</tr>`).join('');
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="${cols}" class="empty">Error loading data.</td></tr>`;});
 }
 function viewDate(){loadDaily();}
+function goToday(){ document.getElementById('hist-date').value=''; loadDaily(); }
 function exportRange(){
   const s=document.getElementById('exp-start').value,e=document.getElementById('exp-end').value;
   if(!s||!e){alert('Pick start and end dates.');return;}
@@ -257,40 +349,146 @@ function loadMonthly(){
   const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
   const tb=document.getElementById('monthly-body');tb.innerHTML=`<tr><td colspan="4" class="empty">Loading…</td></tr>`;
   fetch(API+`/api/monthly_report?month=${m}`).then(r=>r.json()).then(data=>{
-    if(!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No data for ${m}.</td></tr>`;return;}
-    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">${r.name}</td>
+    if(!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No data for ${m}.</td></tr>`;return;}
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)},${JSON.stringify(m)})">${r.name}</td>
       <td class="mono">${r.present_days}</td><td class="mono">${r.total_days}</td>
+      <td class="mono">${fmtHM(r.total_hours)}</td>
       <td><span class="mono" style="font-weight:600">${r.percentage}</span></td></tr>`).join('');
-  }).catch(()=>{tb.innerHTML=`<tr><td colspan="4" class="empty">Error.</td></tr>`;});
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="5" class="empty">Error.</td></tr>`;});
 }
 function exportMonthly(){const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
   window.location.href=API+`/api/export_monthly?month=${m}`;}
 
+// ---- Employee Details ----
+let empDetailId=null, empDetailName=null, empDetailMonth=null;
+function viewEmployeeDetail(empId, empName, month){
+  empDetailId=empId; empDetailName=empName;
+  document.getElementById('emp-detail-name').textContent=empName;
+  document.getElementById('emp-detail-month').value=month||localDateStr().slice(0,7);
+  empDetailMonth=document.getElementById('emp-detail-month').value;
+  document.getElementById('nav-emp-detail').style.display='block';
+  showTab('emp-detail');
+  loadEmployeeDetail();
+}
+function goBackEmployee(){
+  empDetailId=null; empDetailName=null;
+  document.getElementById('nav-emp-detail').style.display='none';
+  showTab('daily');
+}
+function downloadEmployee(){
+  if(!empDetailId){alert('Open an employee first.');return;}
+  const m=document.getElementById('emp-detail-month').value;
+  if(!m){alert('Pick a month.');return;}
+  window.location.href=API+`/api/employee/${empDetailId}/export/${m}`;
+}
+let empCurrentTab='daily';
+function showEmployeeTab(tab){
+  empCurrentTab=tab;
+  document.getElementById('emp-daily-view').style.display=(tab==='daily'?'block':'none');
+  document.getElementById('emp-weekly-view').style.display=(tab==='weekly'?'block':'none');
+  document.getElementById('emp-monthly-view').style.display=(tab==='monthly'?'block':'none');
+  document.getElementById('emp-tab-daily').style.borderBottomColor=(tab==='daily'?'var(--blue)':'transparent');
+  document.getElementById('emp-tab-weekly').style.borderBottomColor=(tab==='weekly'?'var(--blue)':'transparent');
+  document.getElementById('emp-tab-monthly').style.borderBottomColor=(tab==='monthly'?'var(--blue)':'transparent');
+}
+function loadEmployeeDetail(){
+  if(!empDetailId) return;
+  empDetailMonth=document.getElementById('emp-detail-month').value;
+  if(!empDetailMonth){alert('Pick a month.');return;}
+  const m=empDetailMonth;
+
+  // Load Daily
+  fetch(API+`/api/employee/${empDetailId}/daily/${m}`).then(r=>r.json()).then(data=>{
+    const tb=document.getElementById('emp-daily-body');
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No records</td></tr>`;return;}
+    tb.innerHTML=data.map(r=>`<tr><td class="mono">${r.work_date}</td>
+      <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td>
+      <td>${statusBadge(r.status)}</td></tr>`).join('');
+  }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="5" class="empty">Error</td></tr>`;});
+
+  // Load Weekly
+  fetch(API+`/api/employee/${empDetailId}/weekly/${m}`).then(r=>r.json()).then(data=>{
+    const tb=document.getElementById('emp-weekly-body');
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No records</td></tr>`;return;}
+    tb.innerHTML=data.map(w=>`<tr><td class="mono">${w.week}</td>
+      <td class="mono">${w.start_date}</td><td>${w.days_present}</td><td class="mono">${fmtHM(w.total_hours)}</td></tr>`).join('');
+  }).catch(()=>{document.getElementById('emp-weekly-body').innerHTML=`<tr><td colspan="4" class="empty">Error</td></tr>`;});
+
+  // Load Monthly
+  fetch(API+`/api/employee/${empDetailId}/monthly/${m}`).then(r=>r.json()).then(data=>{
+    if(data.error){
+      document.getElementById('emp-monthly-summary').innerHTML=`<div style="grid-column:1/-1;color:var(--muted)">No records for this month.</div>`;
+      return;
+    }
+    document.getElementById('emp-monthly-present').textContent=data.present_days;
+    document.getElementById('emp-monthly-total').textContent=data.total_days;
+    document.getElementById('emp-monthly-hours').textContent=fmtHM(data.total_hours);
+    document.getElementById('emp-monthly-pct').textContent=data.percentage;
+  }).catch(()=>{document.getElementById('emp-monthly-summary').innerHTML=`<div style="grid-column:1/-1;color:var(--muted)">Error loading data.</div>`;});
+
+  showEmployeeTab('daily');
+}
+
 // ---- Mark Attendance (browser camera) ----
 let camStream=null,camBusy=false,camTimer=null;
+// Idle screen-saver state
+let prevGray=null, lastMotion=Date.now(), veiled=false;
+const IDLE_MS = 15000;      // blank the screen after 15s with no motion
+const MOTION_THRESH = 10;   // avg per-cell brightness change that counts as motion
 function banner(state,text){const el=document.getElementById('banner');
   const st={present:['var(--green-bg)','var(--green)'],spoof:['var(--red-bg)','var(--red)'],
     unknown:['var(--yellow-bg)','var(--yellow)'],scan:['var(--accent-soft)','var(--accent)'],
     idle:['var(--inset)','var(--muted)']}[state]||['var(--inset)','var(--muted)'];
   el.style.background=st[0];el.style.color=st[1];el.textContent=text;}
-function startCam(){
+function veilScreen(on){
+  const el=document.getElementById('idle-veil'); if(!el) return;
+  veiled=on; el.style.display = on ? 'flex' : 'none';
+}
+function wakeScreen(){ lastMotion=Date.now(); if(veiled){veilScreen(false);banner('scan','Scanning… look at the camera');} }
+function motionScore(ctx,w,h){
+  // Cheap motion metric: downsample to a grid of grayscale cells and compare to last frame.
+  const data=ctx.getImageData(0,0,w,h).data, step=8, cur=[];
+  for(let y=0;y<h;y+=step)for(let x=0;x<w;x+=step){
+    const i=(y*w+x)*4; cur.push((data[i]+data[i+1]+data[i+2])/3);
+  }
+  let score=0;
+  if(prevGray && prevGray.length===cur.length){
+    let sum=0; for(let k=0;k<cur.length;k++) sum+=Math.abs(cur[k]-prevGray[k]);
+    score=sum/cur.length;
+  }
+  prevGray=cur; return score;
+}
+function startCam(silent){
+  if(camStream) return;               // already running — keep it continuous
   navigator.mediaDevices.getUserMedia({video:{width:640}}).then(s=>{
     camStream=s;document.getElementById('cam').srcObject=s;
     document.getElementById('cam-start').style.display='none';
     document.getElementById('cam-stop').style.display='inline-block';
-    banner('scan','Scanning… look at the camera');camTimer=setInterval(camTick,1200);
-  }).catch(e=>alert('Camera access denied or unavailable: '+e));
+    banner('scan','Scanning… look at the camera');
+    prevGray=null; lastMotion=Date.now(); veilScreen(false);
+    camTimer=setInterval(camTick,1200);
+  }).catch(e=>{ if(!silent) alert('Camera access denied or unavailable: '+e); });
 }
 function stopCam(){
   if(camTimer){clearInterval(camTimer);camTimer=null;}
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  veilScreen(false); prevGray=null;
   const a=document.getElementById('cam-start'),b=document.getElementById('cam-stop');
   if(a)a.style.display='inline-block';if(b)b.style.display='none';banner('idle','Idle — click Start Camera');
 }
 function camTick(){
   if(camBusy||!camStream)return;const v=document.getElementById('cam');if(!v.videoWidth)return;
   const c=document.getElementById('cam-canvas');const w=640,h=Math.round(v.videoHeight*640/v.videoWidth);
-  c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);
+  c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.drawImage(v,0,0,w,h);
+
+  // Motion detection runs every tick, even while the screen is blanked.
+  const m=motionScore(ctx,w,h);
+  if(m>MOTION_THRESH){ lastMotion=Date.now(); if(veiled) wakeScreen(); }
+  else if(!veiled && Date.now()-lastMotion>IDLE_MS){ veilScreen(true); }
+
+  // While blanked, watch for motion only — don't burden the server with scans.
+  if(veiled) return;
+
   camBusy=true;
   fetch(API+'/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({image:c.toDataURL('image/jpeg',0.8)})})
@@ -361,7 +559,10 @@ function loadEmployees(){
     if(!data||!data.length){tb.innerHTML=`<tr><td colspan="3" class="empty">No employees registered.</td></tr>`;return;}
     tb.innerHTML=data.map(e=>`<tr><td style="font-weight:500">${e.employee_name}</td>
       <td class="mono">${e.employee_id}</td>
-      <td><button class="btn-danger" onclick="removeEmp('${e.employee_id}','${(e.employee_name||'').replace(/'/g,"\\'")}')">Remove</button></td></tr>`).join('');
+      <td style="display:flex;gap:8px">
+        <button onclick="renameEmp('${e.employee_id}',${JSON.stringify(e.employee_name||'')})">Rename</button>
+        <button class="btn-danger" onclick="removeEmp('${e.employee_id}','${(e.employee_name||'').replace(/'/g,"\\'")}')">Remove</button>
+      </td></tr>`).join('');
   }).catch(()=>{tb.innerHTML=`<tr><td colspan="3" class="empty">Error.</td></tr>`;});
 }
 function removeEmp(id,name){
@@ -370,32 +571,45 @@ function removeEmp(id,name){
     if(res.success){loadEmployees();}else{alert('Error: '+(res.error||'unknown'));}
   }).catch(()=>alert('Network error.'));
 }
+function renameEmp(id,oldName){
+  const newName=prompt('New name for '+oldName+':',oldName);
+  if(!newName||newName.trim()===''||newName===oldName)return;
+  fetch(API+'/api/rename_employee/'+id,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({employee_name:newName.trim()})}).then(r=>r.json()).then(res=>{
+    if(res.success){loadEmployees();}else{alert('Error: '+(res.error||'unknown'));}
+  }).catch(()=>alert('Network error.'));
+}
 
-// ---- Attendance rules panel (reads live backend config) ----
-function fmtHour(h){
-  const hr=Math.floor(h), mn=Math.round((h-hr)*60);
-  const ampm=hr>=12?'PM':'AM'; let h12=hr%12; if(h12===0)h12=12;
-  return `${h12}:${String(mn).padStart(2,'0')} ${ampm}`;
+// ---- HR correction editor (fix wrong/accidental entry or exit) ----
+let editEmpId=null;
+function editRow(empId,name,entryRaw,exitRaw){
+  editEmpId=empId;
+  document.getElementById('edit-title').textContent='Edit — '+name;
+  document.getElementById('edit-entry').value=entryRaw||'';
+  document.getElementById('edit-exit').value=exitRaw||'';
+  document.getElementById('edit-status').textContent='';
+  document.getElementById('edit-modal').style.display='flex';
 }
-function loadRules(){
-  fetch(API+'/api/config').then(r=>r.json()).then(c=>{
-    const split=fmtHour(c.split_hour), gap=c.exit_min_gap_hours, cd=c.cooldown_minutes;
-    const gapTxt = gap>=1 ? `${gap} hr` : `${Math.round(gap*3600)} sec`;
-    document.getElementById('rule-entry').textContent =
-      `Your first scan of the day — recorded any time before ${split}.`;
-    document.getElementById('rule-exit').textContent =
-      `A scan at or after ${split}, at least ${gapTxt} after your entry.`;
-    document.getElementById('rule-cooldown').textContent =
-      `After a scan you're on cooldown for ${cd} min, so quick repeats don't double-log.`;
-    document.getElementById('rule-note').textContent =
-      `One camera can't tell arrival from departure, so the ${split} split decides entry vs exit. `+
-      `Office hours: ${fmtHour(c.office_start_hour)}–${fmtHour(c.office_end_hour)}.`;
-  }).catch(()=>{});
+function closeEdit(){document.getElementById('edit-modal').style.display='none';editEmpId=null;}
+function saveCorrection(){
+  const entry=document.getElementById('edit-entry').value;
+  const exit=document.getElementById('edit-exit').value;
+  const st=document.getElementById('edit-status');
+  st.textContent='Saving…';st.style.color='var(--muted)';
+  fetch(API+'/api/correct',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({employee_id:editEmpId,work_date:curDate,entry_time:entry,exit_time:exit})})
+    .then(r=>r.json()).then(res=>{
+      if(res.success){closeEdit();loadDaily();}
+      else{st.style.color='var(--red)';st.textContent=res.error||'Error saving.';}
+    }).catch(()=>{st.style.color='var(--red)';st.textContent='Network error.';});
 }
+
 
 // init
+if(editMode){ const th=document.getElementById('th-action'); if(th) th.style.display=''; }
+// Dedicated kiosk: auto-start continuous scanning (this URL only).
+if(kioskMode){ showTab('mark'); startCam(true); }
 loadDaily();
-loadRules();
 setInterval(()=>{if(document.getElementById('daily').classList.contains('active'))loadDaily();},30000);
 </script>
 </body>

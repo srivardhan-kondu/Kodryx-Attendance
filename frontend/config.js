@@ -5,4 +5,4 @@
 //  On Vercel you can instead set this from an env var at build,
 //  but editing this one line is the simplest.
 // ============================================================
-window.API_BASE = "https://YOUR-TUNNEL-URL.trycloudflare.com"; // replace with cloudflared output
+window.API_BASE = ""; // local testing: same-origin (localhost)
