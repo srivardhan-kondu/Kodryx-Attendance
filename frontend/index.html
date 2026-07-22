@@ -276,14 +276,11 @@ function niceDate(iso){const [y,mo,da]=iso.split('-').map(Number);
   return new Date(y,mo-1,da).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
 const todayStr = localDateStr();
 
-// ---- Secret HR-edit route ----
-// The entry/exit Edit controls only appear when the dashboard is opened with
-// this exact URL hash. Regular kiosk users (plain http://…:5000/) never see it.
-// HR bookmarks:  http://<host>:5000/#hr-console-7x2k   (change the token below)
-const EDIT_ROUTE = '#hr-console-7x2k';
-// Edit controls turn on via the secret hash (kiosk) OR automatically on the
-// password-protected HR dashboard (see enableAdminEditing() below).
-let editMode = (location.hash === EDIT_ROUTE);
+// ---- HR edit mode ----
+// The entry/exit Edit and Note controls appear ONLY on the password-protected
+// HR website (where /api/mode reports admin:true after login). They are NEVER
+// shown on the kiosk or an unprotected local dashboard.
+let editMode = false;
 
 // ---- Dedicated kiosk mode ----
 // ONLY the scanning machine opens this URL:  http://<host>:5000/#kiosk
@@ -663,11 +660,11 @@ function enableEditControls(){
 }
 
 // init
-if(editMode){ enableEditControls(); }
-// On the password-protected HR dashboard, edit controls appear automatically
-// after login — no secret URL needed. (Kiosk has no password -> stays hidden.)
+// Edit controls appear ONLY on the password-protected HR website: /api/mode
+// returns admin:true there. The kiosk / unprotected dashboards have no password,
+// so admin is false and the controls never appear.
 fetch(API+'/api/mode').then(r=>r.json()).then(m=>{
-  if(m && m.admin && !editMode){ editMode=true; enableEditControls(); }
+  if(m && m.admin){ editMode=true; enableEditControls(); }
 }).catch(()=>{});
 // Dedicated kiosk: auto-start continuous scanning (this URL only).
 if(kioskMode){ showTab('mark'); startCam(true); }
