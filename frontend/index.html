@@ -312,6 +312,11 @@ function statusBadge(s){const m={'Complete':'badge-green','In office':'badge-blu
   const label = (s==='Auto logout') ? 'Auto logout ⚠' : s;
   return `<span class="badge ${m[s]||'badge-gray'}" title="${s==='Auto logout'?'Employee forgot to log off — hours not counted. HR should edit the real timing.':''}">${label}</span>`;}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// One argument for an inline onclick="..." handler. JSON.stringify alone emits
+// real double quotes, which close the attribute early and silently kill the
+// handler (this is why the HR Edit/Note buttons did nothing); escaping them
+// keeps the attribute intact and the browser decodes it back before running JS.
+function jsArg(v){return escapeHtml(JSON.stringify(v==null?'':String(v)));}
 // Decimal hours (e.g. 7.72) -> "7h 43m" so nobody misreads the .72 as minutes.
 function fmtHM(dec){
   dec = Number(dec)||0;
@@ -338,13 +343,13 @@ function loadDaily(){
     document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
     if(!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records for ${d}.</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">
-        <span style="cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)})">${r.name}</span>
+        <span style="cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail(${jsArg(r.employee_id)},${jsArg(r.name)})">${escapeHtml(r.name)}</span>
         ${r.note?`<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px">📝 ${escapeHtml(r.note)}</div>`:''}
       </td>
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td><td>${statusBadge(r.status)}</td>
       ${editMode?`<td style="white-space:nowrap">
-        <button onclick="editRow('${r.employee_id}',${JSON.stringify(r.name)},'${r.entry_raw||''}','${r.exit_raw||''}')">Edit</button>
-        <button onclick="editNote('${r.employee_id}',${JSON.stringify(r.name)},${JSON.stringify(r.note||'')})">${r.note?'Note ✎':'+ Note'}</button>
+        <button onclick="editRow(${jsArg(r.employee_id)},${jsArg(r.name)},${jsArg(r.entry_raw)},${jsArg(r.exit_raw)})">Edit</button>
+        <button onclick="editNote(${jsArg(r.employee_id)},${jsArg(r.name)},${jsArg(r.note)})">${r.note?'Note ✎':'+ Note'}</button>
       </td>`:''}</tr>`).join('');
   }).catch(()=>{tb.innerHTML=`<tr><td colspan="${cols}" class="empty">Error loading data.</td></tr>`;});
 }
@@ -373,7 +378,7 @@ function loadMonthly(){
   const tb=document.getElementById('monthly-body');tb.innerHTML=`<tr><td colspan="4" class="empty">Loading…</td></tr>`;
   fetch(API+`/api/monthly_report?month=${m}`).then(r=>r.json()).then(data=>{
     if(!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No data for ${m}.</td></tr>`;return;}
-    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail('${r.employee_id}',${JSON.stringify(r.name)},${JSON.stringify(m)})">${r.name}</td>
+    tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail(${jsArg(r.employee_id)},${jsArg(r.name)},${jsArg(m)})">${escapeHtml(r.name)}</td>
       <td class="mono">${r.present_days}</td><td class="mono">${r.total_days}</td>
       <td class="mono">${fmtHM(r.total_hours)}</td>
       <td><span class="mono" style="font-weight:600">${r.percentage}</span></td></tr>`).join('');
@@ -445,8 +450,8 @@ function loadEmployeeDetail(){
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td>
       <td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--muted)">${r.note?escapeHtml(r.note):''}</td>
       ${editMode?`<td style="white-space:nowrap">
-        <button onclick="editRow('${empDetailId}',${JSON.stringify(empDetailName)},'${r.entry_raw||''}','${r.exit_raw||''}','${r.work_date}','profile')">Edit</button>
-        <button onclick="editNote('${empDetailId}',${JSON.stringify(empDetailName)},${JSON.stringify(r.note||'')},'${r.work_date}')">${r.note?'Note ✎':'+ Note'}</button>
+        <button onclick="editRow(${jsArg(empDetailId)},${jsArg(empDetailName)},${jsArg(r.entry_raw)},${jsArg(r.exit_raw)},${jsArg(r.work_date)},'profile')">Edit</button>
+        <button onclick="editNote(${jsArg(empDetailId)},${jsArg(empDetailName)},${jsArg(r.note)},${jsArg(r.work_date)})">${r.note?'Note ✎':'+ Note'}</button>
       </td>`:''}</tr>`).join('');
   }).catch(()=>{document.getElementById('emp-daily-body').innerHTML=`<tr><td colspan="7" class="empty">Error</td></tr>`;});
 
@@ -601,8 +606,8 @@ function loadEmployees(){
     tb.innerHTML=data.map(e=>`<tr><td style="font-weight:500">${e.employee_name}</td>
       <td class="mono">${e.employee_id}</td>
       <td style="display:flex;gap:8px">
-        <button onclick="renameEmp('${e.employee_id}',${JSON.stringify(e.employee_name||'')})">Rename</button>
-        <button class="btn-danger" onclick="removeEmp('${e.employee_id}','${(e.employee_name||'').replace(/'/g,"\\'")}')">Remove</button>
+        <button onclick="renameEmp(${jsArg(e.employee_id)},${jsArg(e.employee_name)})">Rename</button>
+        <button class="btn-danger" onclick="removeEmp(${jsArg(e.employee_id)},${jsArg(e.employee_name)})">Remove</button>
       </td></tr>`).join('');
   }).catch(()=>{tb.innerHTML=`<tr><td colspan="3" class="empty">Error.</td></tr>`;});
 }
