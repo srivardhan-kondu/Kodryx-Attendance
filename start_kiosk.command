@@ -18,7 +18,10 @@ export PORT=5050
 SERVER_PID=$!
 
 sleep 8
-open "http://localhost:5050/"
+# The #kiosk hash is REQUIRED — it auto-starts the camera and opens the Mark
+# Attendance tab. Without it the camera never turns on. Keep it on localhost:
+# browsers only allow camera access on https:// or localhost.
+open "http://localhost:5050/#kiosk"
 
 echo "Kiosk server running (PID $SERVER_PID). Close this window to stop."
 wait $SERVER_PID

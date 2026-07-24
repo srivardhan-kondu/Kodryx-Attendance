@@ -272,8 +272,28 @@ const API = (window.API_BASE || "").replace(/\/$/, "");
 // LOCAL date (not UTC) so it matches the calendar/clock the user sees.
 function localDateStr(dt){const d=dt||new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+// Weekday name + dd-mm-yyyy, e.g. "Friday, 24-07-2026". Built from the y/m/d
+// components (never Date.parse of the ISO string) so it can't drift a day via
+// UTC. This is display only; the timesheet rows use the weekday the backend
+// sends so the two can never disagree.
+// Plain 'YYYY-MM-DD' -> 'dd-mm-yyyy' (no weekday). Safe on empty/odd input.
+function dmy(iso){const p=String(iso||'').split('-');
+  return p.length===3 ? `${p[2]}-${p[1]}-${p[0]}` : String(iso||'');}
 function niceDate(iso){const [y,mo,da]=iso.split('-').map(Number);
-  return new Date(y,mo-1,da).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
+  const wd=new Date(y,mo-1,da).toLocaleDateString('en-IN',{weekday:'long'});
+  return `${wd}, ${String(da).padStart(2,'0')}-${String(mo).padStart(2,'0')}-${y}`;}
+// A timesheet date cell: dd-mm-yyyy on top, weekday below. Saturday & Sunday
+// are named in colour so weekends stand out at a glance; a holiday (Sunday or
+// the 2nd Saturday, per the attendance policy) is tagged too. Weekday, format
+// and flags all come from the backend so nothing is re-derived on the client.
+function dateCell(r){
+  const dmy = r.date_dmy || r.work_date || '';
+  if(!r.weekday) return `<span class="mono">${dmy}</span>`;
+  const col = r.is_weekend ? 'var(--red)' : 'var(--muted)';
+  const tag = r.is_holiday ? ' <span style="color:var(--muted)">· holiday</span>' : '';
+  return `<div class="mono">${dmy}</div>`
+       + `<div style="font-size:11px;font-weight:${r.is_weekend?600:400};color:${col}">${r.weekday}${tag}</div>`;
+}
 const todayStr = localDateStr();
 
 // ---- HR edit mode ----
@@ -293,8 +313,7 @@ const kioskMode = (location.hash === KIOSK_ROUTE);
 function clock(){const n=new Date();document.getElementById('clock').textContent=
   n.toTimeString().slice(0,8);}
 setInterval(clock,1000);clock();
-document.getElementById('today-date').textContent =
-  new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+document.getElementById('today-date').textContent = niceDate(localDateStr());
 
 function showTab(id){
   if(id!=='mark') stopCam();   // leaving the scan tab always stops the camera
@@ -446,7 +465,7 @@ function loadEmployeeDetail(){
     const tb=document.getElementById('emp-daily-body');
     const cols=editMode?7:6;
     if(!data||!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records</td></tr>`;return;}
-    tb.innerHTML=data.map(r=>`<tr><td class="mono">${r.work_date}</td>
+    tb.innerHTML=data.map(r=>`<tr${r.is_weekend?' style="background:var(--inset)"':''}><td>${dateCell(r)}</td>
       <td class="mono">${r.entry}</td><td class="mono">${r.exit}</td><td class="mono">${fmtHM(r.hours)}</td>
       <td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--muted)">${r.note?escapeHtml(r.note):''}</td>
       ${editMode?`<td style="white-space:nowrap">
@@ -460,7 +479,7 @@ function loadEmployeeDetail(){
     const tb=document.getElementById('emp-weekly-body');
     if(!data||!data.length){tb.innerHTML=`<tr><td colspan="4" class="empty">No records</td></tr>`;return;}
     tb.innerHTML=data.map(w=>`<tr><td class="mono">${w.week}</td>
-      <td class="mono">${w.start_date}</td><td>${w.days_present}</td><td class="mono">${fmtHM(w.total_hours)}</td></tr>`).join('');
+      <td class="mono">${dmy(w.start_date)}</td><td>${w.days_present}</td><td class="mono">${fmtHM(w.total_hours)}</td></tr>`).join('');
   }).catch(()=>{document.getElementById('emp-weekly-body').innerHTML=`<tr><td colspan="4" class="empty">Error</td></tr>`;});
 
   // Monthly — always a per-month breakdown across the whole history
@@ -504,8 +523,25 @@ function motionScore(ctx,w,h){
   }
   prevGray=cur; return score;
 }
+// Why the camera can't be used here, or '' if it should work. Browsers only
+// expose navigator.mediaDevices in a secure context — https:// or localhost.
+// Opening the kiosk over http://<lan-ip>:5000 leaves it undefined, so touching
+// .getUserMedia throws synchronously and no .catch() can ever see it.
+function camBlockedReason(){
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return '';
+  return window.isSecureContext
+    ? 'This browser has no camera support.'
+    : `Camera blocked: the page must be opened over https:// or on localhost `
+      + `(this is ${location.protocol}//${location.host}). On the kiosk PC use `
+      + `http://localhost:5000/#kiosk`;
+}
 function startCam(silent){
   if(camStream) return;               // already running — keep it continuous
+  // Never fail silently: in kiosk mode nobody is watching for an alert(), so
+  // the reason always goes to the on-screen banner too.
+  const fail=msg=>{ banner('spoof',msg); if(!silent) alert(msg); };
+  const blocked=camBlockedReason();
+  if(blocked){ fail(blocked); return; }
   navigator.mediaDevices.getUserMedia({video:{width:640}}).then(s=>{
     camStream=s;document.getElementById('cam').srcObject=s;
     document.getElementById('cam-start').style.display='none';
@@ -513,7 +549,14 @@ function startCam(silent){
     banner('scan','Scanning… look at the camera');
     prevGray=null; lastMotion=Date.now(); veilScreen(false);
     camTimer=setInterval(camTick,1200);
-  }).catch(e=>{ if(!silent) alert('Camera access denied or unavailable: '+e); });
+  }).catch(e=>{
+    const why = e && e.name==='NotAllowedError'
+      ? 'Camera permission denied — allow it in the browser address bar, then click Start Camera.'
+      : e && e.name==='NotFoundError'
+        ? 'No camera found on this machine.'
+        : 'Camera unavailable: '+(e && e.name ? e.name+' — '+e.message : e);
+    fail(why);
+  });
 }
 function stopCam(){
   if(camTimer){clearInterval(camTimer);camTimer=null;}
@@ -557,11 +600,15 @@ function camLog(name){const el=document.getElementById('cam-log');
 // ---- Employees ----
 let enrStream=null,enrShots=[];
 function enrStartCam(){
+  const blocked=camBlockedReason();          // same secure-context rule as the kiosk
+  if(blocked){ alert(blocked); return; }
   navigator.mediaDevices.getUserMedia({video:true}).then(s=>{enrStream=s;
     const v=document.getElementById('enr-video');v.srcObject=s;v.style.display='block';
     document.getElementById('enr-cam-btn').style.display='none';
     document.getElementById('enr-cap-btn').style.display='block';
-  }).catch(()=>alert('Camera access denied.'));
+  }).catch(e=>alert(e && e.name==='NotAllowedError'
+    ? 'Camera permission denied — allow it in the browser address bar and try again.'
+    : 'Camera unavailable: '+(e && e.name ? e.name+' — '+e.message : e)));
 }
 function enrCapture(){
   if(enrShots.length>=3){alert('Max 3 photos.');return;}

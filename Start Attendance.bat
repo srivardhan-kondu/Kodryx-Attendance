@@ -27,8 +27,10 @@ echo   To shut down the attendance system, just close this window.
 echo  ============================================================
 echo.
 
-REM Open the dashboard in the default browser ~10 seconds after startup
-start "" /b powershell -WindowStyle Hidden -Command "Start-Sleep 10; Start-Process 'http://localhost:5000'"
+REM Open the dashboard in the default browser ~10 seconds after startup.
+REM #kiosk auto-starts the camera and opens the Mark Attendance tab; drop the
+REM hash if this PC should open as a plain dashboard instead.
+start "" /b powershell -WindowStyle Hidden -Command "Start-Sleep 10; Start-Process 'http://localhost:5000/#kiosk'"
 
 REM Run the server in THIS window (its logs appear below)
 "%PY%" serve.py

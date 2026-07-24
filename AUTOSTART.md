@@ -17,7 +17,8 @@ dashboard, the camera scanning (`/api/scan`), and employee enrollment.
    ```
    MONGO_URI=mongodb+srv://USER:PASS@cluster.xxxx.mongodb.net/attendance_db
    ```
-4. Double-click **`start_kiosk.bat`** to test — a browser opens at `http://localhost:5000`.
+4. Double-click **`start_kiosk.bat`** to test — a browser opens at
+   `http://localhost:5000/#kiosk` and the camera starts scanning by itself.
 
 ### Make it auto-start on boot
 1. Press `Win + R`, type **`shell:startup`**, press Enter (opens the Startup folder).
@@ -47,9 +48,15 @@ dashboard, the camera scanning (`/api/scan`), and employee enrollment.
 - **Daily / Monthly** tabs → view and export reports.
 
 ## Notes
-- The backend must be reachable by the browser. On the kiosk PC use
-  `http://localhost:5000`. From another PC on the office network use
-  `http://<kiosk-pc-ip>:5000`.
+- **The scanning PC must use `http://localhost:5000/#kiosk`.** Two parts matter:
+  - `#kiosk` is what auto-starts the camera and opens Mark Attendance. Without
+    it the page is just a dashboard and the camera never turns on.
+  - `localhost` is what makes the camera legal. Browsers only grant camera
+    access on `https://` or `localhost`, so opening the scanner at
+    `http://<kiosk-pc-ip>:5000` **cannot work** — the browser hides the camera
+    API entirely and the page will say so in the status banner.
+- Other office PCs can still open `http://<kiosk-pc-ip>:5000` to **view**
+  reports; only the camera is unavailable there.
 - Liveness (anti-photo) is ON by default. To relax during testing only:
   set `ENABLE_ANTI_SPOOFING=0` (off) or `LIVENESS_THRESHOLD=0.3` (looser)
   as environment variables before launch.

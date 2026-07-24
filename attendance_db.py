@@ -216,21 +216,45 @@ def _parse_dt(s):
         return None
 
 
+def _date_fields(work_date):
+    """Weekday + dd-mm-yyyy + weekend/holiday flags for a 'YYYY-MM-DD' string.
+    Computed here (server-side) so the dashboard never has to re-derive the
+    weekday from a string and risk an off-by-one — this is the single source
+    of truth, the same parse is_working_day() uses."""
+    if not work_date:
+        return {"weekday": "", "weekday_short": "", "date_dmy": "",
+                "is_weekend": False, "is_holiday": False}
+    try:
+        d = datetime.strptime(work_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return {"weekday": "", "weekday_short": "", "date_dmy": work_date,
+                "is_weekend": False, "is_holiday": False}
+    return {
+        "weekday":       d.strftime("%A"),        # Monday … Sunday
+        "weekday_short": d.strftime("%a"),        # Mon … Sun
+        "date_dmy":      d.strftime("%d-%m-%Y"),  # e.g. 25-07-2026
+        "is_weekend":    d.weekday() >= 5,        # Sat(5) or Sun(6)
+        "is_holiday":    not is_working_day(d),   # Sunday or 2nd Saturday
+    }
+
+
 def _summary_row(row):
     """Format one daily_summary doc for the dashboard, including the
     employee_id + raw 24h times needed by the HR correction editor."""
     fdt = _parse_dt(row.get("first_seen"))
     ldt = _parse_dt(row.get("last_seen"))
+    work_date = row.get("work_date")
     return {
         "employee_id": row.get("employee_id"),
         "name":        row.get("employee_name"),
-        "work_date":   row.get("work_date"),
+        "work_date":   work_date,
         "entry":       fdt.strftime("%I:%M %p") if fdt else "—",
         "exit":        ldt.strftime("%I:%M %p") if ldt else "—",
         "entry_raw":   fdt.strftime("%H:%M") if fdt else "",
         "exit_raw":    ldt.strftime("%H:%M") if ldt else "",
         "hours":       round(float(row.get("hours_worked") or 0.0), 2),
         "status":      row.get("status", "Absent"),
+        **_date_fields(work_date),
     }
 
 
