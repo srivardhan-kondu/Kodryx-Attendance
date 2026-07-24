@@ -473,6 +473,24 @@ def get_registered_employees():
         return {}
 
 
+def _avg_time_of_day(dt_strings):
+    """Average clock time (ignoring the date) across 'YYYY-MM-DD HH:MM:SS'
+    values, returned as '10:58 AM' — or '' if there are none. Averages the
+    seconds-since-midnight, so it reflects the typical arrival/leaving time."""
+    secs = []
+    for s in dt_strings:
+        d = _parse_dt(s)
+        if d:
+            secs.append(d.hour * 3600 + d.minute * 60 + d.second)
+    if not secs:
+        return ""
+    avg = int(round(sum(secs) / len(secs)))
+    h, m = (avg // 3600) % 24, (avg % 3600) // 60
+    ap = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12:02d}:{m:02d} {ap}"
+
+
 def get_monthly_report(month_str: str):
     employees = get_registered_employees()
     report = []
@@ -485,7 +503,8 @@ def get_monthly_report(month_str: str):
     for emp_id, emp_name in employees.items():
         docs = list(db.daily_summary.find(
             {"employee_id": emp_id, "work_date": {"$regex": f"^{month_str}-"}},
-            {"_id": 0, "status": 1, "hours_worked": 1},
+            {"_id": 0, "status": 1, "hours_worked": 1,
+             "first_seen": 1, "last_seen": 1},
         ))
         present_days = sum(1 for d in docs if d.get("status") in present_statuses)
         # Forgotten logouts have 0 stored hours and are NOT estimated — they
@@ -495,17 +514,81 @@ def get_monthly_report(month_str: str):
         pct = (present_days / working_days) * 100 if working_days else 0.0
         pct = min(100.0, round(pct, 1))
 
+        # Per-employee averages HR asked for: typical shift length and the
+        # typical clock-in / clock-out times, over the days they were present.
+        hour_vals = [float(d.get("hours_worked") or 0.0) for d in docs
+                     if d.get("status") in present_statuses and (d.get("hours_worked") or 0)]
+        avg_hours = round(sum(hour_vals) / len(hour_vals), 2) if hour_vals else 0.0
+        avg_in  = _avg_time_of_day(d.get("first_seen") for d in docs)
+        avg_out = _avg_time_of_day(d.get("last_seen") for d in docs)
+
         report.append({
             "employee_id": emp_id,
             "name": emp_name,
             "present_days": present_days,
             "total_days": working_days,
             "total_hours": total_hours,
-            "percentage": f"{pct}%"
+            "percentage": f"{pct}%",
+            "avg_hours_per_day": avg_hours,
+            "avg_in": avg_in,      # "10:58 AM" or ""
+            "avg_out": avg_out,    # "06:52 PM" or ""
         })
 
     report.sort(key=lambda x: float(x["percentage"].replace("%", "")), reverse=True)
     return report
+
+
+def get_weekly_averages(month_str: str):
+    """Company-wide weekly averages for a month (YYYY-MM).
+
+    For each Mon–Sun week that has activity in the month, returns the average
+    hours and average days-present PER EMPLOYEE across the whole team, plus the
+    raw totals. 'Per employee' divides by the enrolled head-count so the number
+    is comparable week to week even if some people never scanned that week.
+    """
+    from datetime import timedelta
+    db = get_db()
+    docs = list(db.daily_summary.find(
+        {"work_date": {"$regex": f"^{month_str}-"}},
+        {"_id": 0, "work_date": 1, "status": 1, "hours_worked": 1},
+    ))
+
+    # Head-count = enrolled employees (stable denominator). Fall back to the
+    # number of distinct people seen this month if the roster can't be read.
+    try:
+        from employee_db import EmployeeDB
+        head = len(EmployeeDB().get_all())
+    except Exception:
+        head = 0
+    head = head or len({d["work_date"] for d in docs}) or 1
+
+    weeks = {}
+    for d in docs:
+        try:
+            dt = datetime.strptime(d["work_date"], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            continue
+        monday = dt - timedelta(days=dt.weekday())        # week starts Monday
+        w = weeks.setdefault(monday, {"hours": 0.0, "present": 0})
+        w["hours"] += float(d.get("hours_worked") or 0.0)
+        if d.get("status") in ("Complete", "In office"):
+            w["present"] += 1
+
+    out = []
+    for monday in sorted(weeks):
+        w = weeks[monday]
+        sunday = monday + timedelta(days=6)
+        out.append({
+            "week_start": monday.strftime("%Y-%m-%d"),
+            "week_end":   sunday.strftime("%Y-%m-%d"),
+            "label":      f"{monday.strftime('%d %b')} – {sunday.strftime('%d %b')}",
+            "employees":  head,
+            "total_hours":   round(w["hours"], 2),
+            "total_present": w["present"],
+            "avg_hours_per_employee": round(w["hours"] / head, 2),
+            "avg_days_per_employee":  round(w["present"] / head, 2),
+        })
+    return out
 
 
 def _is_all(month_str):

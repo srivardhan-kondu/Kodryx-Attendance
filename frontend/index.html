@@ -85,6 +85,7 @@ button:hover{background:var(--inset)}
       <div class="stat-card"><div class="stat-label">Present Today</div><div class="stat-value" id="s-present">—</div></div>
       <div class="stat-card"><div class="stat-label">In Office Now</div><div class="stat-value" id="s-inoffice" style="color:var(--accent)">—</div></div>
       <div class="stat-card"><div class="stat-label">Completed Hours</div><div class="stat-value" id="s-complete" style="color:var(--green)">—</div></div>
+      <div class="stat-card"><div class="stat-label">Absent</div><div class="stat-value" id="s-absent" style="color:var(--red)">—</div></div>
     </div>
     <div class="card">
       <div class="card-head">
@@ -174,8 +175,14 @@ button:hover{background:var(--inset)}
         </div>
       </div>
       <p style="font-size:12px;color:var(--muted);padding:2px 14px 10px">Tip: click any employee's name to open their full individual timesheet.</p>
-      <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Total Hours</th><th>Attendance %</th></tr></thead>
-        <tbody id="monthly-body"><tr><td colspan="5" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
+      <table><thead><tr><th>Employee</th><th>Days Present</th><th>Working Days</th><th>Total Hours</th><th>Avg Hrs/Day</th><th>Avg In</th><th>Avg Out</th><th>Attendance %</th></tr></thead>
+        <tbody id="monthly-body"><tr><td colspan="8" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="card-title">Weekly Averages — all employees</div></div>
+      <p style="font-size:12px;color:var(--muted);padding:2px 14px 10px">Per-employee averages across the whole team, week by week. Generated for the month selected above.</p>
+      <table><thead><tr><th>Week</th><th>Avg Hours / Employee</th><th>Avg Days Present / Employee</th><th>Total Hours</th><th>Employees</th></tr></thead>
+        <tbody id="weekly-avg-body"><tr><td colspan="5" class="empty">Pick a month and click Generate.</td></tr></tbody></table>
     </div>
   </div>
 
@@ -376,6 +383,7 @@ function loadDaily(){
     document.getElementById('s-present').textContent  = data.filter(r=>r.status!=='Absent'&&r.status!=='Leave').length;
     document.getElementById('s-inoffice').textContent = data.filter(r=>r.status==='In office').length;
     document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
+    document.getElementById('s-absent').textContent   = data.filter(r=>r.status==='Absent').length;
     if(!data.length){
       const info=dayInfo(d);
       const msg = info.isHoliday
@@ -417,11 +425,27 @@ function loadMonthly(){
   const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}
   const tb=document.getElementById('monthly-body');tb.innerHTML=`<tr><td colspan="4" class="empty">Loading…</td></tr>`;
   fetch(API+`/api/monthly_report?month=${m}`).then(r=>r.json()).then(data=>{
-    if(!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No data for ${m}.</td></tr>`;return;}
+    if(!data.length){tb.innerHTML=`<tr><td colspan="8" class="empty">No data for ${m}.</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500;cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail(${jsArg(r.employee_id)},${jsArg(r.name)},${jsArg(m)})">${escapeHtml(r.name)}</td>
       <td class="mono">${r.present_days}</td><td class="mono">${r.total_days}</td>
       <td class="mono">${fmtHM(r.total_hours)}</td>
+      <td class="mono">${r.avg_hours_per_day?fmtHM(r.avg_hours_per_day):'—'}</td>
+      <td class="mono">${r.avg_in||'—'}</td><td class="mono">${r.avg_out||'—'}</td>
       <td><span class="mono" style="font-weight:600">${r.percentage}</span></td></tr>`).join('');
+  }).catch(()=>{tb.innerHTML=`<tr><td colspan="8" class="empty">Error.</td></tr>`;});
+  loadWeeklyAverages(m);
+}
+// Company-wide weekly averages (all employees) for the selected month.
+function loadWeeklyAverages(m){
+  const tb=document.getElementById('weekly-avg-body');
+  tb.innerHTML=`<tr><td colspan="5" class="empty">Loading…</td></tr>`;
+  fetch(API+`/api/weekly_averages?month=${m}`).then(r=>r.json()).then(data=>{
+    if(!data||!data.length){tb.innerHTML=`<tr><td colspan="5" class="empty">No data for ${m}.</td></tr>`;return;}
+    tb.innerHTML=data.map(w=>`<tr><td class="mono">${w.label}</td>
+      <td class="mono" style="font-weight:600">${fmtHM(w.avg_hours_per_employee)}</td>
+      <td class="mono">${w.avg_days_per_employee}</td>
+      <td class="mono">${fmtHM(w.total_hours)}</td>
+      <td class="mono">${w.employees}</td></tr>`).join('');
   }).catch(()=>{tb.innerHTML=`<tr><td colspan="5" class="empty">Error.</td></tr>`;});
 }
 function exportMonthly(){const m=document.getElementById('month-sel').value;if(!m){alert('Pick a month.');return;}

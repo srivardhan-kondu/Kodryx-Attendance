@@ -205,6 +205,16 @@ def api_monthly_report():
     return jsonify(get_monthly_report(month))
 
 
+@app.route("/api/weekly_averages")
+def api_weekly_averages():
+    """Company-wide weekly averages (all employees) for ?month=YYYY-MM."""
+    month = request.args.get("month")
+    if not month:
+        return jsonify({"error": "Missing month"}), 400
+    from attendance_db import get_weekly_averages
+    return jsonify(get_weekly_averages(month))
+
+
 @app.route("/api/employee/<emp_id>/daily/<month>")
 def api_employee_daily(emp_id, month):
     """Get employee's daily attendance for a month."""
