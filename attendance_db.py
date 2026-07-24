@@ -14,7 +14,6 @@ from tz_utils import strftime_today, strftime_now, now_ist
 from config import (
     EMBEDDINGS_FILE,
     ATTENDANCE_SPLIT_HOUR, EXIT_MIN_GAP_HOURS, MONGO_URI,
-    ABSENT_CUTOFF_HOUR,
 )
 
 _client = None
@@ -275,15 +274,12 @@ def _summaries_for(target_date):
             row["auto"] = True
         rows.append(row)
 
-    # Absence rule: enrolled employees with no record are marked Absent once the
-    # cutoff has passed — always for past days, and after ABSENT_CUTOFF_HOUR today.
-    # (Before the cutoff today they simply don't appear yet — they may still arrive.)
-    # Non-working days (Sunday / 2nd Saturday) are holidays: nobody is Absent.
-    now = now_ist()
-    past_cutoff = (target_date < today) or (
-        target_date == today and (now.hour + now.minute / 60.0) >= ABSENT_CUTOFF_HOUR
-    )
-    if past_cutoff and target_date <= today and is_working_day(target_date):
+    # Absence rule: on any working day up to today, EVERY enrolled employee
+    # starts Absent by default and flips to present only once they have a scan
+    # record. So the Absent count = registered employees − present, and it drops
+    # live through the day as people arrive. (Future dates are not filled, and
+    # non-working days — Sunday / 2nd Saturday — are holidays: nobody is Absent.)
+    if target_date <= today and is_working_day(target_date):
         present_ids = {r.get("employee_id") for r in docs}
         absentees = [
             {"employee_id": eid, "name": name, "work_date": target_date,
