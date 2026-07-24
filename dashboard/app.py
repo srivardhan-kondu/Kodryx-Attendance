@@ -22,6 +22,7 @@ from attendance_db import (
     get_today_summary, get_date_summary, export_to_excel,
     get_monthly_report, export_monthly_to_excel,
     snapshot_daily_backup, get_daily_backup, correct_attendance,
+    CorrectionError,
 )
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
@@ -110,13 +111,15 @@ def api_correct():
     work_date = data.get("work_date")
     if not emp_id or not work_date:
         return jsonify({"success": False, "error": "employee_id and work_date are required."}), 400
-    rec = correct_attendance(
-        emp_id, work_date,
-        entry_time=data.get("entry_time"),
-        exit_time=data.get("exit_time"),
-    )
-    if rec is None:
-        return jsonify({"success": False, "error": "No attendance record for that person/date."}), 404
+    try:
+        rec = correct_attendance(
+            emp_id, work_date,
+            entry_time=data.get("entry_time"),
+            exit_time=data.get("exit_time"),
+        )
+    except CorrectionError as e:
+        # Bad/rejected times (e.g. entry after exit) — show HR the reason.
+        return jsonify({"success": False, "error": str(e)}), 400
     return jsonify({"success": True, "record": rec})
 
 

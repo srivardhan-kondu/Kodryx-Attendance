@@ -88,7 +88,7 @@ button:hover{background:var(--inset)}
     </div>
     <div class="card">
       <div class="card-head">
-        <div class="card-title"><span id="daily-title">Today's Attendance</span> — <span id="today-date" style="color:var(--muted);font-weight:400"></span></div>
+        <div class="card-title"><span id="daily-title">Today's Attendance</span> — <span id="today-date" style="color:var(--muted);font-weight:400"></span> <span id="daily-daytag"></span></div>
         <div style="display:flex;gap:8px">
           <button class="btn-primary" onclick="goToday()">Today</button>
           <button onclick="loadDaily()">Refresh</button>
@@ -282,6 +282,21 @@ function dmy(iso){const p=String(iso||'').split('-');
 function niceDate(iso){const [y,mo,da]=iso.split('-').map(Number);
   const wd=new Date(y,mo-1,da).toLocaleDateString('en-IN',{weekday:'long'});
   return `${wd}, ${String(da).padStart(2,'0')}-${String(mo).padStart(2,'0')}-${y}`;}
+// Weekday + weekend/holiday flags for a 'YYYY-MM-DD', from the y/m/d parts
+// (no UTC drift). Mirrors the server policy: Sunday and the 2nd Saturday are
+// holidays. Lets the daily dashboard flag Sundays/weekends clearly.
+function dayInfo(iso){const [y,mo,da]=iso.split('-').map(Number);
+  const dt=new Date(y,mo-1,da), dow=dt.getDay();          // 0=Sun … 6=Sat
+  const isSun=dow===0, is2ndSat=(dow===6 && Math.floor((da-1)/7)===1);
+  return {weekday:dt.toLocaleDateString('en-IN',{weekday:'long'}),
+    isWeekend:isSun||dow===6, isSunday:isSun, isHoliday:isSun||is2ndSat};}
+// A coloured header badge naming the day, empty on normal working weekdays.
+function dayTag(iso){const info=dayInfo(iso);
+  if(!info.isWeekend) return '';
+  const txt = info.isSunday ? 'Sunday · Weekly Off'
+            : info.isHoliday ? 'Saturday · 2nd Sat Holiday'
+            : 'Saturday';
+  return `<span class="badge ${info.isHoliday?'badge-red':'badge-yellow'}">${txt}</span>`;}
 // A timesheet date cell: dd-mm-yyyy on top, weekday below. Saturday & Sunday
 // are named in colour so weekends stand out at a glance; a holiday (Sunday or
 // the 2nd Saturday, per the attendance policy) is tagged too. Weekday, format
@@ -354,13 +369,19 @@ function loadDaily(){
   // Reflect the date actually being viewed in the header.
   document.getElementById('daily-title').textContent = (d===today) ? "Today's Attendance" : "Attendance";
   document.getElementById('today-date').textContent = niceDate(d);
+  document.getElementById('daily-daytag').innerHTML = dayTag(d);   // clearly flag Sunday/weekend
   const tb=document.getElementById('daily-body');
   const cols = editMode?6:5;
   fetch(API+ep).then(r=>r.json()).then(data=>{
     document.getElementById('s-present').textContent  = data.filter(r=>r.status!=='Absent'&&r.status!=='Leave').length;
     document.getElementById('s-inoffice').textContent = data.filter(r=>r.status==='In office').length;
     document.getElementById('s-complete').textContent = data.filter(r=>r.status==='Complete').length;
-    if(!data.length){tb.innerHTML=`<tr><td colspan="${cols}" class="empty">No records for ${d}.</td></tr>`;return;}
+    if(!data.length){
+      const info=dayInfo(d);
+      const msg = info.isHoliday
+        ? `${info.weekday} — ${info.isSunday?'weekly off':'2nd Saturday holiday'}. No attendance expected.`
+        : `No records for ${niceDate(d)}.`;
+      tb.innerHTML=`<tr><td colspan="${cols}" class="empty">${msg}</td></tr>`;return;}
     tb.innerHTML=data.map(r=>`<tr><td style="font-weight:500">
         <span style="cursor:pointer;color:var(--blue);text-decoration:underline" onclick="viewEmployeeDetail(${jsArg(r.employee_id)},${jsArg(r.name)})">${escapeHtml(r.name)}</span>
         ${r.note?`<div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px">📝 ${escapeHtml(r.note)}</div>`:''}

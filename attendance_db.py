@@ -338,6 +338,23 @@ def get_date_summary(target_date: str):
     return _summaries_for(target_date)
 
 
+def _employee_name(employee_id):
+    """Best-effort display name for an id: their most recent recorded name,
+    else the id itself. Used when HR adds attendance for a day that has no
+    existing record to copy the name from."""
+    db = get_db()
+    prev = (db.daily_summary.find({"employee_id": employee_id}, {"employee_name": 1})
+            .sort("work_date", -1).limit(1))
+    for p in prev:
+        if p.get("employee_name"):
+            return p["employee_name"]
+    return employee_id
+
+
+class CorrectionError(ValueError):
+    """HR correction rejected for a reason worth showing the user verbatim."""
+
+
 def correct_attendance(employee_id, work_date, entry_time=None, exit_time=None):
     """
     HR manual correction of a person's entry/exit for a given date.
@@ -345,13 +362,14 @@ def correct_attendance(employee_id, work_date, entry_time=None, exit_time=None):
       • a time string  -> set that time (combined with work_date)
       • empty string '' -> clear it (exit '' => back to 'In office')
       • None            -> leave unchanged
+    If no record exists yet (e.g. the person was Absent), one is CREATED as
+    long as an entry time is given — so HR can fill in a missed day.
     Recomputes hours_worked + status and refreshes the daily backup.
-    Returns the updated summary row, or None if no record exists.
+    Returns the updated summary row. Raises CorrectionError with a
+    user-facing message if the requested times are invalid.
     """
     db = get_db()
     doc = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
-    if not doc:
-        return None
 
     def _mk(t):
         t = (t or "").strip()
@@ -361,24 +379,47 @@ def correct_attendance(employee_id, work_date, entry_time=None, exit_time=None):
             t = t + ":00"
         return f"{work_date} {t}"
 
-    update = {}
+    # Start from the existing times, then apply whatever HR changed.
+    first_seen = doc.get("first_seen") if doc else None
+    last_seen  = doc.get("last_seen") if doc else None
     if entry_time is not None and entry_time.strip() != "":
-        update["first_seen"] = _mk(entry_time)
+        first_seen = _mk(entry_time)
     if exit_time is not None:
-        update["last_seen"] = _mk(exit_time)   # '' -> None (cleared)
+        last_seen = _mk(exit_time)             # '' -> None (cleared)
 
-    first_seen = update.get("first_seen", doc.get("first_seen"))
-    last_seen  = update.get("last_seen", doc.get("last_seen"))
+    # Guard: entry must come before exit. Previously this silently clamped to
+    # 0.00 hours and still saved "Complete", so a correction looked like it
+    # "didn't work" (time stuck at 0:00). Now we tell HR exactly what's wrong.
+    if first_seen and last_seen:
+        fdt, ldt = _parse_dt(first_seen), _parse_dt(last_seen)
+        if fdt and ldt and fdt >= ldt:
+            raise CorrectionError(
+                f"Entry ({fdt.strftime('%I:%M %p')}) must be before "
+                f"exit ({ldt.strftime('%I:%M %p')}). Fix the entry time too.")
 
+    # Nothing exists yet and no entry supplied -> nothing to record.
+    if not doc and not first_seen:
+        raise CorrectionError(
+            "This person has no record for that day. Enter an entry time to add one.")
+
+    update = {"first_seen": first_seen, "last_seen": last_seen}
     if last_seen:
-        hours = _hours_between(first_seen, last_seen)
         update["status"] = "Complete"
-        update["hours_worked"] = round(hours, 2)
+        update["hours_worked"] = round(_hours_between(first_seen, last_seen), 2)
     else:
         update["status"] = "In office"
         update["hours_worked"] = 0.0
+    if not doc:                                # creating a fresh record
+        update["employee_id"]   = employee_id
+        update["employee_name"] = _employee_name(employee_id)
+        update["work_date"]     = work_date
+        update["session_breakdown"] = None
+        update["hr_created"]    = True         # marker: added by HR, not scanned
 
-    db.daily_summary.update_one({"_id": doc["_id"]}, {"$set": update})
+    db.daily_summary.update_one(
+        {"employee_id": employee_id, "work_date": work_date},
+        {"$set": update}, upsert=True,
+    )
     snapshot_daily_backup(work_date)
     updated = db.daily_summary.find_one({"employee_id": employee_id, "work_date": work_date})
     return _summary_row(updated)
